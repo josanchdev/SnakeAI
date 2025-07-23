@@ -1,0 +1,44 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.Python
+
+# macOS and Linux files
+.DS_Store
+*.swp
+
+# VSCode/settings (optional)
+.vscode/
+
+# Python metadata & lock files (optional)
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+
+# Pyright, mypy, pyre cache (if you use type checkers)
+.pyright/
+.mypy_cache/
+.pyre_cache/
+
+# UV, Pipenv, Poetry lock files (add as needed)
+uv.lock
+Pipfile.lock
+poetry.lock
+
+# Jupyter notebooks checkpoints (if you add .ipynb)
+.ipynb_checkpoints/
+
+# Plot images or outputs (optional: typically keep plots you want to show)
+plots/*.png
+
+# System-specific
+Thumbs.db
+desktop.ini
+
