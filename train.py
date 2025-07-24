@@ -1,6 +1,40 @@
+# --- Reproducibility: Set random seeds ---
+import random
+random.seed(42)
+import numpy as np
+np.random.seed(42)
+import torch
+torch.manual_seed(42)
 # train.py
 import torch
 import numpy as np
+import torch.nn.functional as F
+# --- DQN Optimization Function ---
+def optimize_model(model, memory, optimizer, batch_size, gamma=0.99):
+    batch = memory.sample(batch_size)
+    states, actions, rewards, next_states, dones = zip(*batch)
+
+    states      = torch.tensor(np.array(states), dtype=torch.float32).view(batch_size, -1)
+    actions     = torch.tensor(actions, dtype=torch.int64).unsqueeze(1)
+    rewards     = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
+    next_states = torch.tensor(np.array(next_states), dtype=torch.float32).view(batch_size, -1)
+    dones       = torch.tensor(dones, dtype=torch.float32).unsqueeze(1)
+
+    # Q(s, a)
+    q_values = model(states).gather(1, actions)
+
+    # Target: r + gamma * max_a' Q_target(s', a') * (1 - done)
+    with torch.no_grad():
+        next_q_values = model(next_states).max(1, keepdim=True)[0]
+    target_q = rewards + gamma * next_q_values * (1 - dones)
+
+    loss = F.mse_loss(q_values, target_q)
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    return loss.item()
 from agent.dqn import DQN
 from agent.memory import ReplayMemory
 from snake_game.game import SnakeGame
@@ -32,33 +66,45 @@ def select_action(model, state, epsilon):
         q_values = model(state)
     return torch.argmax(q_values).item()
 
-def run_episode(env, model, epsilon):
+def run_episode(env, model, epsilon, memory, optimizer):
     state = env.get_state()
     total_reward = 0
     env.running = True
     steps = 0
+    cumulative_loss = 0
+    update_count = 0
 
     while env.running and steps < MAX_STEPS_PER_EP:
         action_idx = select_action(model, state, epsilon)
         next_state, reward, done = env.step(action_idx)
+        memory.add((state, action_idx, reward, next_state, done))
+        if len(memory) >= BATCH_SIZE:
+            loss = optimize_model(model, memory, optimizer, BATCH_SIZE)
+            cumulative_loss += loss
+            update_count += 1
+            if loss is not None and steps % 20 == 0:
+                print(f"Step {steps}: Loss={loss:.4f}")
         total_reward += reward
         state = next_state
         steps += 1
         if done:
             break
 
-    return total_reward, steps
+    avg_loss = cumulative_loss / update_count if update_count > 0 else None
+    return total_reward, steps, avg_loss
 
 def main():
     env = SnakeGame()
     model = DQN(input_dim=env.grid_size * env.grid_size, output_dim=4)
+    memory = ReplayMemory(MEMORY_SIZE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     epsilon = EPS_START
 
     for episode in range(NUM_EPISODES):
         env.reset()  # Reset environment and snake position!
-        reward, steps = run_episode(env, model, epsilon)
-        print(f"Episode {episode+1}: Reward={reward}, Steps={steps}, Epsilon={epsilon:.3f}")
-        epsilon = max(EPS_END, epsilon * EPS_DECAY)
+    reward, steps, avg_loss = run_episode(env, model, epsilon, memory, optimizer)
+    print(f"Episode {episode+1}: Reward={reward}, Steps={steps}, Epsilon={epsilon:.3f}, Avg Loss={avg_loss if avg_loss is not None else 'N/A'}")
+    epsilon = max(EPS_END, epsilon * EPS_DECAY)
 
 if __name__ == "__main__":
     main()
