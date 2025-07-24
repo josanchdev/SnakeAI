@@ -55,7 +55,8 @@ class Fruit:
         self.position = self.new_position(snake_body)
 
 class SnakeGame:
-    def __init__(self, grid_size=12, cell_size=32, mode="human"):
+    def __init__(self, grid_size=12, cell_size=32, mode="human",
+                 reward_fruit=1, reward_death=-10, reward_step=-0.01):
         self.grid_size = grid_size
         self.cell_size = cell_size
         self.snake = Snake(grid_size)
@@ -63,10 +64,13 @@ class SnakeGame:
         self.score = 0
         self.running = True
         self.mode = mode  # "human" or "ai"
+        self.reward_fruit = reward_fruit
+        self.reward_death = reward_death
+        self.reward_step = reward_step
 
-    def ai_step(self, action_idx):
+    def ai_step(self, action_idx, device):
         """Step using AI action index."""
-        self.step(action_idx)
+        self.step(action_idx, device)
 
     def update(self):
         self.snake.move()
@@ -140,7 +144,10 @@ class SnakeGame:
         screen.blit(text_surface, (board_offset_x, board_offset_y - 35))
 
     def reset(self):
-        self.__init__(self.grid_size, self.cell_size)
+        self.__init__(self.grid_size, self.cell_size, self.mode,
+                      reward_fruit=self.reward_fruit,
+                      reward_death=self.reward_death,
+                      reward_step=self.reward_step)
         
 
     def get_state(self, device):
@@ -180,13 +187,13 @@ class SnakeGame:
 
         # Compute reward
         if not self.running:
-            reward = -10  # death penalty
+            reward = self.reward_death
             done = True
         elif self.score > prev_score:
-            reward = 1    # fruit eaten
+            reward = self.reward_fruit
             done = False
         else:
-            reward = 0    # normal step
+            reward = self.reward_step
             done = False
 
         # Get next observation

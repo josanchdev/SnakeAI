@@ -12,10 +12,10 @@ def test_optimize_model_returns_scalar_loss():
     memory = ReplayMemory(100)
     # Populate memory with a mock batch
     for _ in range(32):
-        state = np.zeros((144,), dtype=np.float32)
+        state = torch.zeros((144,), dtype=torch.float32)
         action = np.random.randint(0, 4)
         reward = np.random.randn()
-        next_state = np.zeros((144,), dtype=np.float32)
+        next_state = torch.zeros((144,), dtype=torch.float32)
         done = np.random.choice([True, False])
         memory.add((state, action, reward, next_state, done))
     loss = optimize_model(model, memory, optimizer, 32, device)
@@ -28,10 +28,10 @@ def test_optimize_model_changes_weights():
     memory = ReplayMemory(100)
     # Populate memory with a mock batch
     for _ in range(32):
-        state = np.zeros((144,), dtype=np.float32)
+        state = torch.zeros((144,), dtype=torch.float32)
         action = np.random.randint(0, 4)
         reward = np.random.randn()
-        next_state = np.zeros((144,), dtype=np.float32)
+        next_state = torch.zeros((144,), dtype=torch.float32)
         done = np.random.choice([True, False])
         memory.add((state, action, reward, next_state, done))
     # Save initial weights

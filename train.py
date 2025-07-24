@@ -23,10 +23,10 @@ CHECKPOINT_DIR = "checkpoints"
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 SAVE_EVERY = 5000 #
-NUM_EPISODES = 10000   # Start small for debugging
+NUM_EPISODES = 10000  # Start small for debugging
 MAX_STEPS_PER_EP = 100    # To prevent runaway loops
 MEMORY_SIZE = 50000
-BATCH_SIZE = 256
+BATCH_SIZE = 128
 EPS_START = 1.0
 EPS_END = 0.05
 EPS_DECAY = 0.995  # Decay epsilon by this factor per episode
@@ -87,6 +87,9 @@ def run_episode(env, model, epsilon, memory, optimizer, device):
     while env.running and steps < MAX_STEPS_PER_EP:
         action_idx = select_action(model, state, epsilon, device)
         next_state, reward, done = env.step(action_idx, device)
+        # Penalize every step with a small negative reward
+        step_penalty = -0.01
+        reward += step_penalty
         memory.add((state, action_idx, reward, next_state, done))
         if len(memory) >= BATCH_SIZE:
             loss = optimize_model(model, memory, optimizer, BATCH_SIZE, device)
@@ -97,14 +100,6 @@ def run_episode(env, model, epsilon, memory, optimizer, device):
         steps += 1
         if done:
             break
-
-    # If episode ended due to stalling (max steps), apply penalty
-    if steps >= MAX_STEPS_PER_EP and env.running:
-        stalled = True
-        reward = -10
-        done = True
-        memory.add((state, action_idx, reward, state, done))
-        total_reward += reward
 
     avg_loss = cumulative_loss / update_count if update_count > 0 else None
     return total_reward, steps, avg_loss

@@ -86,12 +86,12 @@ def main():
                     game.reset()
             elif event.type == MOVE_EVENT and game.running:
                 if mode == "ai" and ai_model:
-                    state = game.get_state().flatten().astype(np.float32)
-                    state_tensor = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+                    state = game.get_state(device).flatten()
+                    state_tensor = state.unsqueeze(0)
                     with torch.no_grad():
                         q_values = ai_model(state_tensor)
                         action_idx = torch.argmax(q_values).item()
-                    game.ai_step(action_idx)
+                    game.ai_step(action_idx, device)
                 else:
                     game.update()
 
