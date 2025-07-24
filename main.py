@@ -44,23 +44,27 @@ def main():
     # Set up game and agent
     game = SnakeGame(grid_size, cell_size, mode=mode)
     ai_model = None
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Using device:", device)
     if mode == "ai":
         checkpoint = get_latest_checkpoint("checkpoints")
         if checkpoint:
-            ai_model = DQN(grid_size*grid_size, 4)
-            ai_model.load_state_dict(torch.load(checkpoint, map_location="cpu"))
+            ai_model = DQN(grid_size*grid_size, 4).to(device)
+            ai_model.load_state_dict(torch.load(checkpoint, map_location=device))
+            ai_model.to(device)
             ai_model.eval()
         else:
             print("No checkpoint found. AI will not play.")
 
-    MOVE_EVENT = pygame.USEREVENT
+    MOVE_EVENT = pygame.USEREVENT + 1
     pygame.time.set_timer(MOVE_EVENT, 90)
     running = True
+    menu_message = "Press SPACE for AI, ARROWS for Human, ESC to quit"
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            if event.type == pygame.KEYDOWN:
+            elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 if mode == "human":
@@ -74,20 +78,25 @@ def main():
                         game.snake.set_direction((1, 0))
                 if event.key == pygame.K_r and not game.running:
                     game.reset()
-        if event.type == MOVE_EVENT and game.running:
-            if mode == "ai" and ai_model:
-                state = game.get_state().flatten().astype(np.float32)
-                state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-                with torch.no_grad():
-                    q_values = ai_model(state_tensor)
-                    action_idx = torch.argmax(q_values).item()
-                game.ai_step(action_idx)
-            else:
-                game.update()
+            elif event.type == MOVE_EVENT and game.running:
+                if mode == "ai" and ai_model:
+                    state = game.get_state().flatten().astype(np.float32)
+                    state_tensor = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+                    with torch.no_grad():
+                        q_values = ai_model(state_tensor)
+                        action_idx = torch.argmax(q_values).item()
+                    game.ai_step(action_idx)
+                else:
+                    game.update()
 
         game.draw(screen)
         if not game.running:
             game.draw_game_over(screen)
+        elif not game.running and mode is None:
+            # Show menu message if needed
+            font = pygame.font.SysFont(None, 36)
+            text = font.render(menu_message, True, (255, 255, 255))
+            screen.blit(text, (20, 20))
         pygame.display.flip()
         clock.tick(60)
 

@@ -5,6 +5,9 @@ import pygame
 from snake_game.game import SnakeGame
 from agent.dqn import DQN
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", device)
+
 def get_latest_checkpoint(checkpoint_dir):
     files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pth')]
     if not files:
@@ -18,7 +21,8 @@ def ai_play(num_episodes=10, grid_size=12, cell_size=32):
         print("No checkpoint found.")
         return
     model = DQN(grid_size*grid_size, 4)
-    model.load_state_dict(torch.load(checkpoint, map_location="cpu"))
+    model.load_state_dict(torch.load(checkpoint, map_location=device))
+    model.to(device)
     model.eval()
     epsilon = 0.0  # Fully greedy
 
@@ -38,7 +42,7 @@ def ai_play(num_episodes=10, grid_size=12, cell_size=32):
                     pygame.quit(); return
             if game.running:
                 state = game.get_state().flatten().astype(np.float32)
-                state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+                state_tensor = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
                 with torch.no_grad():
                     q_values = model(state_tensor)
                     action_idx = torch.argmax(q_values).item()

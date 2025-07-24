@@ -2,8 +2,12 @@ import torch
 import numpy as np
 from agent.memory import ReplayMemory
 from train import optimize_model
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", device)
+
 def test_optimize_model_returns_scalar_loss():
-    model = DQN(144, 4)
+    model = DQN(144, 4).to(device)
     optimizer = torch.optim.Adam(model.parameters())
     memory = ReplayMemory(100)
     # Populate memory with a mock batch
@@ -14,12 +18,12 @@ def test_optimize_model_returns_scalar_loss():
         next_state = np.zeros((144,), dtype=np.float32)
         done = np.random.choice([True, False])
         memory.add((state, action, reward, next_state, done))
-    loss = optimize_model(model, memory, optimizer, 32)
+    loss = optimize_model(model, memory, optimizer, 32, device)
     assert isinstance(loss, float)
     assert loss >= 0
 
 def test_optimize_model_changes_weights():
-    model = DQN(144, 4)
+    model = DQN(144, 4).to(device)
     optimizer = torch.optim.Adam(model.parameters())
     memory = ReplayMemory(100)
     # Populate memory with a mock batch
@@ -32,7 +36,7 @@ def test_optimize_model_changes_weights():
         memory.add((state, action, reward, next_state, done))
     # Save initial weights
     initial_weights = [p.clone() for p in model.parameters()]
-    optimize_model(model, memory, optimizer, 32)
+    optimize_model(model, memory, optimizer, 32, device)
     # Check if any weights changed
     changed = any(not torch.equal(w, p) for w, p in zip(initial_weights, model.parameters()))
     assert changed
@@ -51,27 +55,27 @@ ACTIONS = [
 
 def test_select_action_random_and_greedy():
     env = SnakeGame()
-    model = DQN(input_dim=env.grid_size * env.grid_size, output_dim=4)
+    model = DQN(input_dim=env.grid_size * env.grid_size, output_dim=4).to(device)
     state = env.get_state()
 
     # With epsilon=1 (full random), check action validity
-    action = select_action(model, state, epsilon=1.0)
+    action = select_action(model, state, epsilon=1.0, device=device)
     assert isinstance(action, int)
     assert 0 <= action < len(ACTIONS)
 
     # With epsilon=0 (full greedy), check action validity
-    action = select_action(model, state, epsilon=0.0)
+    action = select_action(model, state, epsilon=0.0, device=device)
     assert isinstance(action, int)
     assert 0 <= action < len(ACTIONS)
 
 def test_run_episode_basic():
     env = SnakeGame()
-    model = DQN(input_dim=env.grid_size * env.grid_size, output_dim=4)
+    model = DQN(input_dim=env.grid_size * env.grid_size, output_dim=4).to(device)
     from agent.memory import ReplayMemory
     import torch
     memory = ReplayMemory(100)
     optimizer = torch.optim.Adam(model.parameters())
-    total_reward, steps, _ = run_episode(env, model, epsilon=0.5, memory=memory, optimizer=optimizer)
+    total_reward, steps, _ = run_episode(env, model, epsilon=0.5, memory=memory, optimizer=optimizer, device=device)
     assert isinstance(total_reward, (int, float))
     assert isinstance(steps, int)
     assert 0 < steps <= 250  # default max steps per episode
@@ -91,13 +95,13 @@ def test_training_run():
     from train import run_episode
 
     env = SnakeGame()
-    model = DQN(input_dim=env.grid_size * env.grid_size, output_dim=4)
+    model = DQN(input_dim=env.grid_size * env.grid_size, output_dim=4).to(device)
     memory = ReplayMemory(1000)
     optimizer = torch.optim.Adam(model.parameters())
     epsilon = 1.0
 
     env.reset()
-    reward, steps, avg_loss = run_episode(env, model, epsilon, memory, optimizer)
+    reward, steps, avg_loss = run_episode(env, model, epsilon, memory, optimizer, device=device)
     assert isinstance(reward, (int, float))
     assert isinstance(steps, int)
     assert avg_loss is None or isinstance(avg_loss, float)
