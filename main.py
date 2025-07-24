@@ -16,18 +16,24 @@ def main():
     pygame.init()
     grid_size = 12
     cell_size = 32
-    screen = pygame.display.set_mode((grid_size*cell_size, grid_size*cell_size))
+    screen_width = 600
+    screen_height = 600
+    grid_pixel_width = grid_size * cell_size
+    board_offset_x = (screen_width - grid_pixel_width) // 2
+    board_offset_y = (screen_height - grid_pixel_width) // 2
+
+    screen = pygame.display.set_mode((screen_width, screen_height))
     clock = pygame.time.Clock()
     pygame.display.set_caption("SlytherNN: Snake RL - Menu")
 
     # Adaptive font size
-    font_size = max(20, int(min(screen.get_width(), screen.get_height()) // 20))
+    font_size = max(20, int(min(screen_width, screen_height) // 20))
     font = pygame.font.SysFont("arial", font_size)
     menu_text = font.render("Press [Space] for AI, [Arrow Keys] for Human", True, (255,255,255))
     menu_rect = menu_text.get_rect(center=screen.get_rect().center)
     mode = None
     while mode is None:
-        screen.fill((0,0,0))
+        screen.fill((26,26,32))
         screen.blit(menu_text, menu_rect)
         pygame.display.flip()
         for event in pygame.event.get():
@@ -89,7 +95,7 @@ def main():
                 else:
                     game.update()
 
-        game.draw(screen)
+        game.draw(screen, board_offset_x, board_offset_y)
         if not game.running:
             game.draw_game_over(screen)
         elif not game.running and mode is None:

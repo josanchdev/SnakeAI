@@ -74,26 +74,46 @@ class SnakeGame:
             self.fruit.respawn(self.snake.body)
             self.score += 1
         if self.snake.collided_with_self() or self.snake.collided_with_wall():
-            print(f"[DEBUG] Snake died! Head: {self.snake.head()}, Direction: {self.snake.direction}")
-            if self.snake.collided_with_wall():
-                print(f"[DEBUG] Reason: Collided with wall.")
-            if self.snake.collided_with_self():
-                print(f"[DEBUG] Reason: Collided with self.")
             self.running = False
 
-    def draw(self, screen):
-        screen.fill((0, 0, 0))
+    def draw(self, screen, board_offset_x=0, board_offset_y=0):
+        # Modern dark gradient background
+        for y in range(screen.get_height()):
+            color = (
+                26 + int(20 * y / screen.get_height()),
+                26 + int(20 * y / screen.get_height()),
+                32 + int(40 * y / screen.get_height())
+            )
+            pygame.draw.line(screen, color, (0, y), (screen.get_width(), y))
+
+        # Draw grid borders
+        grid_w = self.grid_size * self.cell_size
+        grid_h = self.grid_size * self.cell_size
+        border_rect = pygame.Rect(board_offset_x, board_offset_y, grid_w, grid_h)
+        pygame.draw.rect(screen, (80, 80, 100), border_rect, width=4, border_radius=12)
+
+        # Draw snake
         for segment in self.snake.body:
             pygame.draw.rect(
                 screen, (0, 180, 45),
-                (segment[0]*self.cell_size, segment[1]*self.cell_size, self.cell_size, self.cell_size)
+                (
+                    board_offset_x + segment[0]*self.cell_size,
+                    board_offset_y + segment[1]*self.cell_size,
+                    self.cell_size, self.cell_size
+                ),
+                border_radius=7
             )
+        # Draw fruit
         fx, fy = self.fruit.position
-        pygame.draw.rect(
-            screen, (200, 60, 60),
-            (fx*self.cell_size, fy*self.cell_size, self.cell_size, self.cell_size)
+        pygame.draw.ellipse(
+            screen, (220, 60, 60),
+            (
+                board_offset_x + fx*self.cell_size,
+                board_offset_y + fy*self.cell_size,
+                self.cell_size, self.cell_size
+            ),
         )
-        self.draw_scoreboard(screen)
+        self.draw_scoreboard(screen, board_offset_x, board_offset_y)
 
     def draw_game_over(self, screen):
         font_size = max(20, int(min(screen.get_width(), screen.get_height()) // 10))
@@ -111,11 +131,12 @@ class SnakeGame:
 
         screen.blit(text_surface, text_rect)
     
-    def draw_scoreboard(self, screen):
+    def draw_scoreboard(self, screen, board_offset_x=0, board_offset_y=0):
         font = pygame.font.SysFont("arial", 24)
         score_text = f"Score: {self.score}"
         text_surface = font.render(score_text, True, (255, 255, 255))
-        screen.blit(text_surface, (10, 10))
+        # Place above the grid, aligned with grid edge
+        screen.blit(text_surface, (board_offset_x, board_offset_y - 35))
 
     def reset(self):
         self.__init__(self.grid_size, self.cell_size)
@@ -183,54 +204,4 @@ class SnakeGame:
 
 	
 
-if __name__ == "__main__":
-    pygame.init()
-    grid_size = 12
-    cell_size = 32
-    screen = pygame.display.set_mode((grid_size*cell_size, grid_size*cell_size))
-    clock = pygame.time.Clock()
-    pygame.display.set_caption("AI-Ready Minimal Snake - Pygame")
 
-    game = SnakeGame(grid_size, cell_size)
-    MOVE_EVENT = pygame.USEREVENT
-    pygame.time.set_timer(MOVE_EVENT, 90)
-
-    # Default to human mode
-    mode = "human"
-    ai_action_idx = 0
-
-    while True:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit(); sys.exit()
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    pygame.quit(); sys.exit()
-                elif event.key == pygame.K_SPACE:
-                    mode = "ai"
-                    game.mode = "ai"
-                elif event.key in (pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT):
-                    mode = "human"
-                    game.mode = "human"
-                    if event.key == pygame.K_UP:
-                        game.snake.set_direction((0, -1))
-                    elif event.key == pygame.K_DOWN:
-                        game.snake.set_direction((0, 1))
-                    elif event.key == pygame.K_LEFT:
-                        game.snake.set_direction((-1, 0))
-                    elif event.key == pygame.K_RIGHT:
-                        game.snake.set_direction((1, 0))
-                elif event.key == pygame.K_r and not game.running:
-                    game.reset()
-            if event.type == MOVE_EVENT and game.running:
-                if mode == "ai":
-                    # Placeholder: always take action 0 (up)
-                    game.ai_step(ai_action_idx)
-                else:
-                    game.update()
-
-        game.draw(screen)
-        if not game.running:
-            game.draw_game_over(screen)
-        pygame.display.flip()
-        clock.tick(60)
