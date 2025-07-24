@@ -1,5 +1,6 @@
 import pygame
 import sys
+import numpy as np
 from snake_game.utils import random_position
 
 class Snake:
@@ -108,10 +109,18 @@ class SnakeGame:
 
     def reset(self):
         self.__init__(self.grid_size, self.cell_size)
+        
+    def get_state(self):
+        state = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
+        for (x, y) in self.snake.body:
+            state[x, y] = 1
+        fx, fy = self.fruit.position
+        state[fx, fy] = 2
+        return state
 
 if __name__ == "__main__":
     pygame.init()
-    grid_size = 15
+    grid_size = 12
     cell_size = 32
     screen = pygame.display.set_mode((grid_size*cell_size, grid_size*cell_size))
     clock = pygame.time.Clock()
