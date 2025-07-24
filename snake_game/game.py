@@ -118,6 +118,19 @@ class SnakeGame:
         state[fx, fy] = 2
         return state
 
+    def get_state(self):
+        state = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
+        for (x, y) in self.snake.body:
+            if 0 <= x < self.grid_size and 0 <= y < self.grid_size:
+                state[x, y] = 1
+        fx, fy = self.fruit.position
+        if 0 <= fx < self.grid_size and 0 <= fy < self.grid_size:
+            state[fx, fy] = 2
+        return state
+
+
+	
+
 if __name__ == "__main__":
     pygame.init()
     grid_size = 12
