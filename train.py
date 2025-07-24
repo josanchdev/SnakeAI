@@ -90,8 +90,7 @@ def run_episode(env, model, epsilon, memory, optimizer, device):
             loss = optimize_model(model, memory, optimizer, BATCH_SIZE, device)
             cumulative_loss += loss
             update_count += 1
-            if loss is not None and steps % 20 == 0:
-                print(f"Step {steps}: Loss={loss:.4f}")
+            # Removed step-level logging for speed
         total_reward += reward
         state = next_state
         steps += 1
@@ -104,7 +103,6 @@ def run_episode(env, model, epsilon, memory, optimizer, device):
 def main():
     env = SnakeGame()
     model = DQN(input_dim=env.grid_size * env.grid_size, output_dim=4).to(device)
-    print("Model is on device:", next(model.parameters()).device)
     memory = ReplayMemory(MEMORY_SIZE)
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     epsilon = EPS_START
@@ -119,17 +117,16 @@ def main():
         for episode in range(NUM_EPISODES):
             env.reset()  # Reset environment and snake position!
             reward, steps, avg_loss = run_episode(env, model, epsilon, memory, optimizer, device)
-            print(f"Episode {episode+1}: Reward={reward}, Steps={steps}, Epsilon={epsilon:.3f}, Avg Loss={avg_loss if avg_loss is not None else 'N/A'}")
+            # Removed episode-level print for speed
             writer.writerow([episode+1, reward, steps, epsilon, avg_loss if avg_loss is not None else 'N/A'])
 
             if (episode + 1) % SAVE_EVERY == 0:
                 torch.save(model.state_dict(), checkpoint_path(episode + 1))
-                print(f"Checkpoint saved at episode {episode + 1}")
-            # Example for loading (if you ever reload during training):
-            # model.load_state_dict(torch.load(checkpoint_path(episode + 1), map_location=device))
-            # model.to(device)
+                # Removed checkpoint print for speed
 
             epsilon = max(EPS_END, epsilon * EPS_DECAY)
 
 if __name__ == "__main__":
+    print("Training started.")
     main()
+    print("Training ended.")
