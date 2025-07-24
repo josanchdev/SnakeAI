@@ -69,6 +69,11 @@ class SnakeGame:
             self.fruit.respawn(self.snake.body)
             self.score += 1
         if self.snake.collided_with_self() or self.snake.collided_with_wall():
+            print(f"[DEBUG] Snake died! Head: {self.snake.head()}, Direction: {self.snake.direction}")
+            if self.snake.collided_with_wall():
+                print(f"[DEBUG] Reason: Collided with wall.")
+            if self.snake.collided_with_self():
+                print(f"[DEBUG] Reason: Collided with self.")
             self.running = False
 
     def draw(self, screen):
@@ -127,6 +132,48 @@ class SnakeGame:
         if 0 <= fx < self.grid_size and 0 <= fy < self.grid_size:
             state[fx, fy] = 2
         return state
+    
+    ACTIONS = [
+        (0, -1),  # Up
+        (0, 1),   # Down
+        (-1, 0),  # Left
+        (1, 0),   # Right
+    ]
+
+    def step(self, action_idx: int):
+        """
+        Apply action, update game state, and return (next_state, reward, done).
+        Action index maps to direction as per ACTIONS list.
+        """
+        # Validate action index
+        if action_idx not in range(len(self.ACTIONS)):
+            raise ValueError(f"Invalid action index: {action_idx}")
+
+        # Set snake direction
+        self.snake.set_direction(self.ACTIONS[action_idx])
+
+        # Save previous score to detect fruit eaten
+        prev_score = self.score
+
+        # Move snake and update game
+        self.update()
+
+        # Compute reward
+        if not self.running:
+            reward = -10  # death penalty
+            done = True
+        elif self.score > prev_score:
+            reward = 1    # fruit eaten
+            done = False
+        else:
+            reward = 0    # normal step
+            done = False
+
+        # Get next observation
+        next_state = self.get_state()
+
+        return next_state, reward, done
+
 
 
 	

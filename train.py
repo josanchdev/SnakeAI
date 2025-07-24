@@ -6,7 +6,7 @@ from agent.memory import ReplayMemory
 from snake_game.game import SnakeGame
 
 # ==== Hyperparameters ====
-NUM_EPISODES = 10          # Start small for debugging
+NUM_EPISODES = 20          # Start small for debugging
 MAX_STEPS_PER_EP = 250     # To prevent runaway loops
 MEMORY_SIZE = 1000
 BATCH_SIZE = 32
@@ -40,16 +40,12 @@ def run_episode(env, model, epsilon):
 
     while env.running and steps < MAX_STEPS_PER_EP:
         action_idx = select_action(model, state, epsilon)
-        env.snake.set_direction(ACTIONS[action_idx])
-        env.update()
-        # Only get next_state if game is still running
-        if env.running:
-            next_state = env.get_state()
-            # Reward logic placeholder (to be made real in next steps)
-            reward = 0  # Replace/update this with actual reward
-            total_reward += reward
-            state = next_state
+        next_state, reward, done = env.step(action_idx)
+        total_reward += reward
+        state = next_state
         steps += 1
+        if done:
+            break
 
     return total_reward, steps
 
@@ -59,6 +55,7 @@ def main():
     epsilon = EPS_START
 
     for episode in range(NUM_EPISODES):
+        env.reset()  # Reset environment and snake position!
         reward, steps = run_episode(env, model, epsilon)
         print(f"Episode {episode+1}: Reward={reward}, Steps={steps}, Epsilon={epsilon:.3f}")
         epsilon = max(EPS_END, epsilon * EPS_DECAY)
