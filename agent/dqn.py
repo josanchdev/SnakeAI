@@ -6,14 +6,18 @@ import torch.nn.functional as F  # Functional API for layers (e.g., activation f
 class DQN(nn.Module):
 	def __init__(self, input_dim, output_dim):
 		super(DQN, self).__init__()
-		# Define the neural network architecture
-		self.fc1 = nn.Linear(input_dim, 128)  # First fully connected layer
-		self.fc2 = nn.Linear(128, 128)         # Second fully connected layer
-		self.fc3 = nn.Linear(128, output_dim)  # Output layer
+		# Larger architecture for full GPU utilization
+		self.fc1 = nn.Linear(input_dim, 1024)
+		self.fc2 = nn.Linear(1024, 1024)
+		self.fc3 = nn.Linear(1024, 512)
+		self.fc4 = nn.Linear(512, 256)
+		self.fc5 = nn.Linear(256, output_dim)
 
 	def forward(self, x):
-		# Forward pass through the network
-		x = F.relu(self.fc1(x))  # Apply ReLU activation after first layer
-		x = F.relu(self.fc2(x))  # Apply ReLU activation after second layer
-		x = self.fc3(x)           # Output layer (no activation function)
+		# Forward pass through the larger network
+		x = F.relu(self.fc1(x))
+		x = F.relu(self.fc2(x))
+		x = F.relu(self.fc3(x))
+		x = F.relu(self.fc4(x))
+		x = self.fc5(x)
 		return x
