@@ -54,13 +54,18 @@ class Fruit:
         self.position = self.new_position(snake_body)
 
 class SnakeGame:
-    def __init__(self, grid_size=12, cell_size=32):
+    def __init__(self, grid_size=12, cell_size=32, mode="human"):
         self.grid_size = grid_size
         self.cell_size = cell_size
         self.snake = Snake(grid_size)
         self.fruit = Fruit(grid_size, self.snake.body)
         self.score = 0
         self.running = True
+        self.mode = mode  # "human" or "ai"
+
+    def ai_step(self, action_idx):
+        """Step using AI action index."""
+        self.step(action_idx)
 
     def update(self):
         self.snake.move()
@@ -190,6 +195,10 @@ if __name__ == "__main__":
     MOVE_EVENT = pygame.USEREVENT
     pygame.time.set_timer(MOVE_EVENT, 90)
 
+    # Default to human mode
+    mode = "human"
+    ai_action_idx = 0
+
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -197,18 +206,28 @@ if __name__ == "__main__":
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     pygame.quit(); sys.exit()
-                elif event.key == pygame.K_UP:
-                    game.snake.set_direction((0, -1))
-                elif event.key == pygame.K_DOWN:
-                    game.snake.set_direction((0, 1))
-                elif event.key == pygame.K_LEFT:
-                    game.snake.set_direction((-1, 0))
-                elif event.key == pygame.K_RIGHT:
-                    game.snake.set_direction((1, 0))
+                elif event.key == pygame.K_SPACE:
+                    mode = "ai"
+                    game.mode = "ai"
+                elif event.key in (pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT):
+                    mode = "human"
+                    game.mode = "human"
+                    if event.key == pygame.K_UP:
+                        game.snake.set_direction((0, -1))
+                    elif event.key == pygame.K_DOWN:
+                        game.snake.set_direction((0, 1))
+                    elif event.key == pygame.K_LEFT:
+                        game.snake.set_direction((-1, 0))
+                    elif event.key == pygame.K_RIGHT:
+                        game.snake.set_direction((1, 0))
                 elif event.key == pygame.K_r and not game.running:
                     game.reset()
             if event.type == MOVE_EVENT and game.running:
-                game.update()
+                if mode == "ai":
+                    # Placeholder: always take action 0 (up)
+                    game.ai_step(ai_action_idx)
+                else:
+                    game.update()
 
         game.draw(screen)
         if not game.running:

@@ -1,3 +1,4 @@
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -42,3 +43,7 @@ plots/*.png
 Thumbs.db
 desktop.ini
 
+# RL outputs and logs
+logs/
+checkpoints/
+*.csv

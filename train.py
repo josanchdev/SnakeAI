@@ -1,15 +1,41 @@
-# --- Reproducibility: Set random seeds ---
+import os
 import random
-random.seed(42)
 import numpy as np
-np.random.seed(42)
 import torch
-torch.manual_seed(42)
-# train.py
-import torch
-import numpy as np
 import torch.nn.functional as F
-# --- DQN Optimization Function ---
+import csv
+
+random.seed(42)
+np.random.seed(42)
+torch.manual_seed(42)
+
+from agent.dqn import DQN
+from agent.memory import ReplayMemory
+from snake_game.game import SnakeGame
+
+# ==== Hyperparameters ====
+LOG_DIR = "logs"
+CHECKPOINT_DIR = "checkpoints"
+os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+SAVE_EVERY = 5000 #
+NUM_EPISODES = 10000        # Start small for debugging
+MAX_STEPS_PER_EP = 100    # To prevent runaway loops
+MEMORY_SIZE = 50000
+BATCH_SIZE = 32
+EPS_START = 1.0
+EPS_END = 0.05
+EPS_DECAY = 0.995  # Decay epsilon by this factor per episode
+LEARNING_RATE = 1e-3
+
+# ==== Helper: Map actions ====
+ACTIONS = [
+    (0, -1),  # Up
+    (0, 1),   # Down
+    (-1, 0),  # Left
+    (1, 0),   # Right
+]
+
 def optimize_model(model, memory, optimizer, batch_size, gamma=0.99):
     batch = memory.sample(batch_size)
     states, actions, rewards, next_states, dones = zip(*batch)
@@ -35,27 +61,6 @@ def optimize_model(model, memory, optimizer, batch_size, gamma=0.99):
     optimizer.step()
 
     return loss.item()
-from agent.dqn import DQN
-from agent.memory import ReplayMemory
-from snake_game.game import SnakeGame
-
-# ==== Hyperparameters ====
-NUM_EPISODES = 20          # Start small for debugging
-MAX_STEPS_PER_EP = 250     # To prevent runaway loops
-MEMORY_SIZE = 1000
-BATCH_SIZE = 32
-EPS_START = 1.0
-EPS_END = 0.05
-EPS_DECAY = 0.995  # Decay epsilon by this factor per episode
-LEARNING_RATE = 1e-3
-
-# ==== Helper: Map actions ====
-ACTIONS = [
-    (0, -1),  # Up
-    (0, 1),   # Down
-    (-1, 0),  # Left
-    (1, 0),   # Right
-]
 
 def select_action(model, state, epsilon):
     # Choose random or best action
@@ -100,11 +105,24 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     epsilon = EPS_START
 
-    for episode in range(NUM_EPISODES):
-        env.reset()  # Reset environment and snake position!
-    reward, steps, avg_loss = run_episode(env, model, epsilon, memory, optimizer)
-    print(f"Episode {episode+1}: Reward={reward}, Steps={steps}, Epsilon={epsilon:.3f}, Avg Loss={avg_loss if avg_loss is not None else 'N/A'}")
-    epsilon = max(EPS_END, epsilon * EPS_DECAY)
+    log_path = os.path.join(LOG_DIR, 'training_log.csv')
+    checkpoint_path = lambda ep: os.path.join(CHECKPOINT_DIR, f'dqn_snake_checkpoint_ep{ep}.pth')
+
+    with open(log_path, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['Episode', 'Reward', 'Steps', 'Epsilon', 'AvgLoss'])
+
+        for episode in range(NUM_EPISODES):
+            env.reset()  # Reset environment and snake position!
+            reward, steps, avg_loss = run_episode(env, model, epsilon, memory, optimizer)
+            print(f"Episode {episode+1}: Reward={reward}, Steps={steps}, Epsilon={epsilon:.3f}, Avg Loss={avg_loss if avg_loss is not None else 'N/A'}")
+            writer.writerow([episode+1, reward, steps, epsilon, avg_loss if avg_loss is not None else 'N/A'])
+
+            if (episode + 1) % SAVE_EVERY == 0:
+                torch.save(model.state_dict(), checkpoint_path(episode + 1))
+                print(f"Checkpoint saved at episode {episode + 1}")
+
+            epsilon = max(EPS_END, epsilon * EPS_DECAY)
 
 if __name__ == "__main__":
     main()

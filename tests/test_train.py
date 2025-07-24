@@ -83,5 +83,24 @@ def test_epsilon_decay():
         epsilon = max(EPS_END, epsilon * EPS_DECAY)
         assert EPS_END <= epsilon <= EPS_START
 
+def test_training_run():
+    from snake_game.game import SnakeGame
+    from agent.dqn import DQN
+    from agent.memory import ReplayMemory
+    import torch
+    from train import run_episode
+
+    env = SnakeGame()
+    model = DQN(input_dim=env.grid_size * env.grid_size, output_dim=4)
+    memory = ReplayMemory(1000)
+    optimizer = torch.optim.Adam(model.parameters())
+    epsilon = 1.0
+
+    env.reset()
+    reward, steps, avg_loss = run_episode(env, model, epsilon, memory, optimizer)
+    assert isinstance(reward, (int, float))
+    assert isinstance(steps, int)
+    assert avg_loss is None or isinstance(avg_loss, float)
+
 if __name__ == "__main__":
     pytest.main()
