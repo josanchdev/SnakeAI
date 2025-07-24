@@ -1,6 +1,7 @@
 import pygame
 import sys
 import numpy as np
+import torch
 from snake_game.utils import random_position
 
 class Snake:
@@ -141,22 +142,15 @@ class SnakeGame:
     def reset(self):
         self.__init__(self.grid_size, self.cell_size)
         
-    def get_state(self):
-        state = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
-        for (x, y) in self.snake.body:
-            state[x, y] = 1
-        fx, fy = self.fruit.position
-        state[fx, fy] = 2
-        return state
 
-    def get_state(self):
-        state = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
+    def get_state(self, device):
+        state = torch.zeros((self.grid_size, self.grid_size), dtype=torch.float32, device=device)
         for (x, y) in self.snake.body:
             if 0 <= x < self.grid_size and 0 <= y < self.grid_size:
-                state[x, y] = 1
+                state[x, y] = 1.0
         fx, fy = self.fruit.position
         if 0 <= fx < self.grid_size and 0 <= fy < self.grid_size:
-            state[fx, fy] = 2
+            state[fx, fy] = 2.0
         return state
     
     ACTIONS = [
@@ -166,7 +160,7 @@ class SnakeGame:
         (1, 0),   # Right
     ]
 
-    def step(self, action_idx: int):
+    def step(self, action_idx: int, device):
         """
         Apply action, update game state, and return (next_state, reward, done).
         Action index maps to direction as per ACTIONS list.
@@ -196,7 +190,7 @@ class SnakeGame:
             done = False
 
         # Get next observation
-        next_state = self.get_state()
+        next_state = self.get_state(device)
 
         return next_state, reward, done
 

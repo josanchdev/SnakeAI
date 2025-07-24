@@ -56,7 +56,7 @@ ACTIONS = [
 def test_select_action_random_and_greedy():
     env = SnakeGame()
     model = DQN(input_dim=env.grid_size * env.grid_size, output_dim=4).to(device)
-    state = env.get_state()
+    state = env.get_state(device)
 
     # With epsilon=1 (full random), check action validity
     action = select_action(model, state, epsilon=1.0, device=device)
