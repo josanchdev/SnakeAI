@@ -56,7 +56,7 @@ class Fruit:
 
 class SnakeGame:
     def __init__(self, grid_size=12, cell_size=32, mode="human",
-                 reward_fruit=1, reward_death=-10, reward_step=-0.01):
+                 reward_fruit=5, reward_death=-10, reward_step=0):
         self.grid_size = grid_size
         self.cell_size = cell_size
         self.snake = Snake(grid_size)
@@ -151,6 +151,7 @@ class SnakeGame:
         
 
     def get_state(self, device):
+        # Grid encoding
         state = torch.zeros((self.grid_size, self.grid_size), dtype=torch.float32, device=device)
         for (x, y) in self.snake.body:
             if 0 <= x < self.grid_size and 0 <= y < self.grid_size:
@@ -158,34 +159,36 @@ class SnakeGame:
         fx, fy = self.fruit.position
         if 0 <= fx < self.grid_size and 0 <= fy < self.grid_size:
             state[fx, fy] = 2.0
-        return state
+
+        # Direction one-hot (up, down, left, right)
+        dir_map = {(0, -1): 0, (0, 1): 1, (-1, 0): 2, (1, 0): 3}
+        direction = torch.zeros(4, device=device)
+        direction[dir_map.get(self.snake.direction, 0)] = 1.0
+
+        # Relative fruit position (normalized to [-1, 1])
+        head_x, head_y = self.snake.head()
+        dx = (fx - head_x) / (self.grid_size - 1)
+        dy = (fy - head_y) / (self.grid_size - 1)
+        rel_fruit = torch.tensor([dx, dy], dtype=torch.float32, device=device)
+
+        # Flatten grid and concatenate extra features
+        flat = state.flatten()
+        full_state = torch.cat([flat, direction, rel_fruit])
+        return full_state
     
-    ACTIONS = [
-        (0, -1),  # Up
-        (0, 1),   # Down
-        (-1, 0),  # Left
-        (1, 0),   # Right
-    ]
+
 
     def step(self, action_idx: int, device):
         """
         Apply action, update game state, and return (next_state, reward, done).
-        Action index maps to direction as per ACTIONS list.
+        Action index maps to direction as per agent.dqn.ACTIONS.
         """
-        # Validate action index
-        if action_idx not in range(len(self.ACTIONS)):
+        from agent.dqn import ACTIONS
+        if not isinstance(action_idx, int) or action_idx not in range(len(ACTIONS)):
             raise ValueError(f"Invalid action index: {action_idx}")
-
-        # Set snake direction
-        self.snake.set_direction(self.ACTIONS[action_idx])
-
-        # Save previous score to detect fruit eaten
+        self.snake.set_direction(ACTIONS[action_idx])
         prev_score = self.score
-
-        # Move snake and update game
         self.update()
-
-        # Compute reward
         if not self.running:
             reward = self.reward_death
             done = True
@@ -195,10 +198,7 @@ class SnakeGame:
         else:
             reward = self.reward_step
             done = False
-
-        # Get next observation
         next_state = self.get_state(device)
-
         return next_state, reward, done
 
 

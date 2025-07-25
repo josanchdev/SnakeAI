@@ -15,7 +15,7 @@ def test_step_eating_fruit_and_death():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     next_state, reward, done = game.step(3, device)
     assert isinstance(next_state, torch.Tensor)
-    assert reward == 1  # fruit eaten
+    assert reward == 5  # fruit eaten (default reward_fruit=5)
     assert not done
 
     # Move snake into wall to simulate death
