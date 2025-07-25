@@ -18,6 +18,7 @@ torch.manual_seed(seed)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
+
 # Hyperparameters
 LOG_DIR = "logs"
 CHECKPOINT_DIR = "checkpoints"
@@ -25,7 +26,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 NUM_ENVS = 64
-NUM_EPISODES = 4000
+NUM_EPISODES = 1000
 MAX_STEPS_PER_EP = 100
 MEMORY_SIZE = 100000
 BATCH_SIZE = 128
@@ -36,6 +37,7 @@ EPS_DECAY = 0.995
 LEARNING_RATE = 5e-4
 TARGET_UPDATE_FREQ = 1000  # steps
 GRAD_ACCUM_STEPS = 2  # Number of optimize_model() calls before optimizer.step()
+SAVE_EVERY = 1000  # Save every N completed episodes
 
 # Initialize environments in batch
 envs = VectorEnv(num_envs=NUM_ENVS, device=device)
@@ -140,12 +142,36 @@ def main():
     global epsilon, step_count
     start_time = time.time()
 
+
     states = envs.reset()
     episode_rewards = torch.zeros(NUM_ENVS, device=device)
     episode_steps = torch.zeros(NUM_ENVS, device=device)
     episode_counts = torch.zeros(NUM_ENVS, device=device)
     rewards_log = []
+    completed_episodes = 0
 
+    def checkpoint_path(ep):
+        return os.path.join(CHECKPOINT_DIR, f'dqn_snake_checkpoint_ep{ep}.pth')
+
+    def cleanup_old_checkpoints(current_ep, keep=3):
+        """Remove checkpoints older than the most recent `keep` ones."""
+        all_ckpts = [f for f in os.listdir(CHECKPOINT_DIR) if f.startswith('dqn_snake_checkpoint_ep') and f.endswith('.pth')]
+        # Extract episode numbers
+        eps = []
+        for fname in all_ckpts:
+            try:
+                num = int(fname.split('_ep')[1].split('.pth')[0])
+                eps.append((num, fname))
+            except Exception:
+                continue
+        eps.sort()
+        # Remove all but the last `keep` checkpoints
+        for num, fname in eps[:-keep]:
+            try:
+                os.remove(os.path.join(CHECKPOINT_DIR, fname))
+                print(f"Deleted old checkpoint: {fname}")
+            except Exception as e:
+                print(f"Could not delete {fname}: {e}")
 
     with open(os.path.join(LOG_DIR, 'training_log.csv'), 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
@@ -166,6 +192,7 @@ def main():
             # When done, log episode info and reset counters for that env
             for i in range(NUM_ENVS):
                 if dones[i]:
+                    completed_episodes += 1
                     print(f"Episode {int(episode_counts[i]+1)} finished in env {i} with reward {episode_rewards[i].item()}")
                     writer.writerow([int(episode_counts[i]+1), 
                                      episode_rewards[i].item(), 
@@ -175,6 +202,12 @@ def main():
                     episode_rewards[i] = 0
                     episode_steps[i] = 0
                     episode_counts[i] += 1
+                    # Save checkpoint every SAVE_EVERY completed episodes
+                    if completed_episodes % SAVE_EVERY == 0:
+                        ckpt_path = checkpoint_path(completed_episodes)
+                        torch.save(policy_net.state_dict(), ckpt_path)
+                        print(f"Saved model checkpoint at {completed_episodes} episodes.")
+                        cleanup_old_checkpoints(completed_episodes, keep=3)
 
             loss = optimize_model()
 
