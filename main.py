@@ -58,7 +58,11 @@ def main():
             # Match input_dim to training: grid_size*grid_size + 4 + 2
             input_dim = grid_size * grid_size + 4 + 2
             ai_model = DQN(input_dim=input_dim, output_dim=4).to(device)
-            ai_model.load_state_dict(torch.load(checkpoint, map_location=device))
+            state = torch.load(checkpoint, map_location=device, weights_only=False)
+            if isinstance(state, dict) and 'model' in state:
+                ai_model.load_state_dict(state['model'])
+            else:
+                ai_model.load_state_dict(state)
             ai_model.to(device)
             ai_model.eval()
         else:

@@ -56,7 +56,7 @@ class Fruit:
 
 class SnakeGame:
     def __init__(self, grid_size=12, cell_size=32, mode="human",
-                 reward_fruit=5, reward_death=-10, reward_step=0):
+                 reward_fruit=5, reward_death=-10, reward_step=-0.01):
         self.grid_size = grid_size
         self.cell_size = cell_size
         self.snake = Snake(grid_size)

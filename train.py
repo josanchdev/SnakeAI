@@ -212,6 +212,7 @@ def main():
             except Exception:
                 pass
 
+
     import datetime
     with open(os.path.join(LOG_DIR, 'training_log.csv'), 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
@@ -225,6 +226,7 @@ def main():
         # Track per-episode losses for each env
         episode_losses = torch.zeros(NUM_ENVS, device=device)
         global_episode_counter = 0
+        last_milestone = 0
 
         while episode_counts.min() < NUM_EPISODES:
             actions = select_actions_batch(policy_net, states, epsilon)
@@ -250,6 +252,7 @@ def main():
             for i in range(NUM_ENVS):
                 if dones[i]:
                     global_episode_counter += 1
+                    completed_episodes += 1
                     avg_loss = episode_losses[i].item() / episode_steps[i].item() if episode_steps[i].item() > 0 else 0.0
                     timestamp = datetime.datetime.now().isoformat()
                     writer.writerow([
@@ -278,9 +281,12 @@ def main():
                             'episode_steps': episode_steps.cpu().numpy(),
                         }, ckpt_path)
                         cleanup_old_checkpoints(completed_episodes, keep=3)
-                    # Print milestone summary every 100 completed episodes (once, not per env)
-                    if completed_episodes % 100 == 0 and i == 0:
-                        print(f"Milestone: {completed_episodes} episodes completed.")
+
+            # Print milestone summary only once per 100 global episodes (not per env, not at 0)
+            min_episode = int(episode_counts.min().item())
+            if min_episode >= last_milestone + 100 and min_episode > 0:
+                last_milestone = (min_episode // 100) * 100
+                print(f"Milestone: {last_milestone} episodes completed.")
 
             # Update target network periodically
             if step_count % TARGET_UPDATE_FREQ == 0:
