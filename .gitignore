@@ -36,9 +36,6 @@ poetry.lock
 # Jupyter notebooks checkpoints (if you add .ipynb)
 .ipynb_checkpoints/
 
-# Plot images or outputs (optional: typically keep plots you want to show)
-plots/*.png
-
 # System-specific
 Thumbs.db
 desktop.ini
