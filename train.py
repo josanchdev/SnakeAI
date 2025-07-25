@@ -55,7 +55,7 @@ memory = PrioritizedReplayMemory(capacity=MEMORY_SIZE)
 
 # Mixed precision scaler (only if CUDA)
 use_amp = torch.cuda.is_available()
-scaler = torch.cuda.amp.GradScaler() if use_amp else None
+scaler = torch.amp.GradScaler('cuda') if use_amp else None
 
 epsilon = EPS_START
 step_count = 0  # total environment steps
@@ -100,7 +100,7 @@ def optimize_model():
         optimize_model.accum_loss = 0.0
 
     if use_amp:
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast('cuda'):
             current_q = policy_net(states).gather(1, actions)
             with torch.no_grad():
                 next_q = target_net(next_states).max(1, keepdim=True)[0]
@@ -138,17 +138,57 @@ def optimize_model():
     memory.update_priorities(idxs, td_errors_np)
     return ret_loss
 
+
+def get_latest_checkpoint(checkpoint_dir):
+    files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pth') and 'dqn_snake_checkpoint_ep' in f]
+    if not files:
+        return None, 0
+    files.sort(key=lambda x: int(x.split('_ep')[1].split('.pth')[0]))
+    latest = files[-1]
+    ep = int(latest.split('_ep')[1].split('.pth')[0])
+    return os.path.join(checkpoint_dir, latest), ep
+
 def main():
     global epsilon, step_count
     start_time = time.time()
 
-
-    states = envs.reset()
+    # Resume from latest checkpoint if available
+    checkpoint, completed_episodes = get_latest_checkpoint(CHECKPOINT_DIR)
     episode_rewards = torch.zeros(NUM_ENVS, device=device)
     episode_steps = torch.zeros(NUM_ENVS, device=device)
     episode_counts = torch.zeros(NUM_ENVS, device=device)
+    if checkpoint:
+        print(f"Resuming from checkpoint: {checkpoint}")
+        state = torch.load(checkpoint, map_location=device)
+        per_env_missing = False
+        if isinstance(state, dict) and 'model' in state and 'optimizer' in state:
+            policy_net.load_state_dict(state['model'])
+            target_net.load_state_dict(state['model'])
+            optimizer.load_state_dict(state['optimizer'])
+            # Restore per-env stats if present
+            if 'episode_counts' in state:
+                episode_counts = torch.tensor(state['episode_counts'], device=device)
+            else:
+                per_env_missing = True
+            if 'episode_rewards' in state:
+                episode_rewards = torch.tensor(state['episode_rewards'], device=device)
+            else:
+                per_env_missing = True
+            if 'episode_steps' in state:
+                episode_steps = torch.tensor(state['episode_steps'], device=device)
+            else:
+                per_env_missing = True
+            if per_env_missing:
+                print("[WARN] Checkpoint missing per-env episode_counts/rewards/steps, initializing all to zero and starting per-env logs from 0.")
+        else:
+            policy_net.load_state_dict(state)
+            target_net.load_state_dict(state)
+        print(f"Resumed at {completed_episodes} completed episodes.")
+    else:
+        completed_episodes = 0
+
+    states = envs.reset()
     rewards_log = []
-    completed_episodes = 0
 
     def checkpoint_path(ep):
         return os.path.join(CHECKPOINT_DIR, f'dqn_snake_checkpoint_ep{ep}.pth')
@@ -205,7 +245,14 @@ def main():
                     # Save checkpoint every SAVE_EVERY completed episodes
                     if completed_episodes % SAVE_EVERY == 0:
                         ckpt_path = checkpoint_path(completed_episodes)
-                        torch.save(policy_net.state_dict(), ckpt_path)
+                        # Save model, optimizer, and per-env stats for full reproducibility
+                        torch.save({
+                            'model': policy_net.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+                            'episode_counts': episode_counts.cpu().numpy(),
+                            'episode_rewards': episode_rewards.cpu().numpy(),
+                            'episode_steps': episode_steps.cpu().numpy(),
+                        }, ckpt_path)
                         print(f"Saved model checkpoint at {completed_episodes} episodes.")
                         cleanup_old_checkpoints(completed_episodes, keep=3)
 
