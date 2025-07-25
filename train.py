@@ -159,7 +159,7 @@ def main():
     episode_counts = torch.zeros(NUM_ENVS, device=device)
     if checkpoint:
         print(f"Resuming from checkpoint: {checkpoint}")
-        state = torch.load(checkpoint, map_location=device)
+        state = torch.load(checkpoint, map_location=device, weights_only=False)
         per_env_missing = False
         if isinstance(state, dict) and 'model' in state and 'optimizer' in state:
             policy_net.load_state_dict(state['model'])
@@ -209,13 +209,22 @@ def main():
         for num, fname in eps[:-keep]:
             try:
                 os.remove(os.path.join(CHECKPOINT_DIR, fname))
-                print(f"Deleted old checkpoint: {fname}")
-            except Exception as e:
-                print(f"Could not delete {fname}: {e}")
+            except Exception:
+                pass
 
+    import datetime
     with open(os.path.join(LOG_DIR, 'training_log.csv'), 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Episode', 'Reward', 'Steps', 'Epsilon', 'AvgLoss'])
+        # Prepare header: add reward breakdown columns if available in future
+        header = [
+            'GlobalEpisode', 'EnvID', 'Episode', 'Reward', 'Steps', 'Epsilon', 'AvgLoss', 'Timestamp'
+            # 'Reward_Fruit', 'Reward_Step', ... (future)
+        ]
+        writer.writerow(header)
+
+        # Track per-episode losses for each env
+        episode_losses = torch.zeros(NUM_ENVS, device=device)
+        global_episode_counter = 0
 
         while episode_counts.min() < NUM_EPISODES:
             actions = select_actions_batch(policy_net, states, epsilon)
@@ -225,27 +234,42 @@ def main():
             for i in range(NUM_ENVS):
                 memory.add((states[i].to(device), actions[i].item(), rewards[i].item(), next_states[i].to(device), dones[i].item()))
 
-            # Accumulate rewards and steps
+            # Accumulate rewards, steps, and losses
             episode_rewards += rewards
             episode_steps += 1
+
+            # Get loss for this step (shared for all envs, so just use for all)
+            loss = optimize_model()
+            if loss is not None:
+                # Distribute loss equally to all running envs for this step
+                for i in range(NUM_ENVS):
+                    if not dones[i]:
+                        episode_losses[i] += loss / NUM_ENVS
 
             # When done, log episode info and reset counters for that env
             for i in range(NUM_ENVS):
                 if dones[i]:
-                    completed_episodes += 1
-                    print(f"Episode {int(episode_counts[i]+1)} finished in env {i} with reward {episode_rewards[i].item()}")
-                    writer.writerow([int(episode_counts[i]+1), 
-                                     episode_rewards[i].item(), 
-                                     int(episode_steps[i].item()), 
-                                     epsilon, 
-                                     'NA'])  # you can add loss tracking if desired
+                    global_episode_counter += 1
+                    avg_loss = episode_losses[i].item() / episode_steps[i].item() if episode_steps[i].item() > 0 else 0.0
+                    timestamp = datetime.datetime.now().isoformat()
+                    writer.writerow([
+                        global_episode_counter,  # GlobalEpisode
+                        i,                      # EnvID
+                        int(episode_counts[i]+1), # Episode (per-env)
+                        episode_rewards[i].item(),
+                        int(episode_steps[i].item()),
+                        epsilon,
+                        avg_loss,
+                        timestamp
+                        # reward_fruit, reward_step, ... (future)
+                    ])
                     episode_rewards[i] = 0
                     episode_steps[i] = 0
                     episode_counts[i] += 1
+                    episode_losses[i] = 0
                     # Save checkpoint every SAVE_EVERY completed episodes
                     if completed_episodes % SAVE_EVERY == 0:
                         ckpt_path = checkpoint_path(completed_episodes)
-                        # Save model, optimizer, and per-env stats for full reproducibility
                         torch.save({
                             'model': policy_net.state_dict(),
                             'optimizer': optimizer.state_dict(),
@@ -253,10 +277,10 @@ def main():
                             'episode_rewards': episode_rewards.cpu().numpy(),
                             'episode_steps': episode_steps.cpu().numpy(),
                         }, ckpt_path)
-                        print(f"Saved model checkpoint at {completed_episodes} episodes.")
                         cleanup_old_checkpoints(completed_episodes, keep=3)
-
-            loss = optimize_model()
+                    # Print milestone summary every 100 completed episodes (once, not per env)
+                    if completed_episodes % 100 == 0 and i == 0:
+                        print(f"Milestone: {completed_episodes} episodes completed.")
 
             # Update target network periodically
             if step_count % TARGET_UPDATE_FREQ == 0:
