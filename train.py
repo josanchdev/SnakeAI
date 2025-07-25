@@ -27,13 +27,12 @@ os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 NUM_ENVS = 64
 NUM_EPISODES = 1000
-MAX_STEPS_PER_EP = 100
 MEMORY_SIZE = 100000
 BATCH_SIZE = 128
 EPS_START = 1.0
 EPS_END = 0.05
 EPS_DECAY = 0.995
-
+MAX_STEPS_SINCE_REWARD = 100  
 LEARNING_RATE = 5e-4
 TARGET_UPDATE_FREQ = 1000  # steps
 GRAD_ACCUM_STEPS = 2  # Number of optimize_model() calls before optimizer.step()
@@ -189,6 +188,9 @@ def main():
 
     states = envs.reset()
     rewards_log = []
+    # New: Track steps since last reward increase for each env
+    steps_since_last_reward = torch.zeros(NUM_ENVS, device=device)
+    last_rewards = torch.zeros(NUM_ENVS, device=device)
 
     def checkpoint_path(ep):
         return os.path.join(CHECKPOINT_DIR, f'dqn_snake_checkpoint_ep{ep}.pth')
@@ -228,9 +230,24 @@ def main():
         global_episode_counter = 0
         last_milestone = 0
 
+
         while episode_counts.min() < NUM_EPISODES:
             actions = select_actions_batch(policy_net, states, epsilon)
             next_states, rewards, dones = envs.step(actions)
+
+            # New: Update steps_since_last_reward
+            for i in range(NUM_ENVS):
+                # If reward increased, reset counter
+                if rewards[i].item() > last_rewards[i].item():
+                    steps_since_last_reward[i] = 0
+                else:
+                    steps_since_last_reward[i] += 1
+                last_rewards[i] = rewards[i]
+
+            # End episode if steps_since_last_reward exceeds threshold
+            for i in range(NUM_ENVS):
+                if steps_since_last_reward[i] >= MAX_STEPS_SINCE_REWARD:
+                    dones[i] = True
 
             # Store transitions
             for i in range(NUM_ENVS):
@@ -270,6 +287,8 @@ def main():
                     episode_steps[i] = 0
                     episode_counts[i] += 1
                     episode_losses[i] = 0
+                    steps_since_last_reward[i] = 0
+                    last_rewards[i] = 0
                     # Save checkpoint every SAVE_EVERY completed episodes
                     if completed_episodes % SAVE_EVERY == 0:
                         ckpt_path = checkpoint_path(completed_episodes)

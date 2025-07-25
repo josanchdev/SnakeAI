@@ -65,3 +65,64 @@ def test_optimize_model_with_per():
     train.memory = memory
     loss = optimize_model()
     assert loss is None or isinstance(loss, float)
+
+import torch
+
+def test_steps_since_last_reward_logic():
+    """
+    Test the 'steps_since_last_reward' counter logic that:
+    - resets to zero only when reward strictly increases (fruit eaten),
+    - increments otherwise,
+    - triggers done when threshold is reached.
+
+    Uses a small threshold for quick testing.
+    """
+
+    NUM_ENVS = 3
+    MAX_STEPS_SINCE_REWARD = 5  # small for test speed
+    steps_since_last_reward = torch.zeros(NUM_ENVS)
+    last_rewards = torch.zeros(NUM_ENVS)
+    dones = torch.zeros(NUM_ENVS, dtype=torch.bool)
+
+    # Simulate 10 steps of reward sequences per env:
+    # Env 0 never gets reward (should be done at step 5)
+    # Env 1 gets reward at step 2 and never again (should be done at step 7)
+    # Env 2 gets rewards at steps 4 and 7 (should NOT be done)
+    rewards_seq = [
+        torch.tensor([0.0, 0.0, 0.0]),  # step 1
+        torch.tensor([0.0, 1.0, 0.0]),  # step 2 (env1 gets fruit)
+        torch.tensor([0.0, 1.0, 0.0]),  # step 3
+        torch.tensor([0.0, 1.0, 1.0]),  # step 4 (env2 gets fruit)
+        torch.tensor([0.0, 1.0, 1.0]),  # step 5
+        torch.tensor([0.0, 1.0, 1.0]),  # step 6
+        torch.tensor([0.0, 1.0, 2.0]),  # step 7 (env2 gets fruit again)
+        torch.tensor([0.0, 1.0, 2.0]),  # step 8
+        torch.tensor([0.0, 1.0, 2.0]),  # step 9
+        torch.tensor([0.0, 1.0, 2.0]),  # step 10
+    ]
+
+    for t, rewards in enumerate(rewards_seq):
+        for i in range(NUM_ENVS):
+            # Reset steps counter only if reward strictly increased (fruit eaten)
+            if rewards[i].item() > last_rewards[i].item():
+                steps_since_last_reward[i] = 0
+            else:
+                steps_since_last_reward[i] += 1
+
+            last_rewards[i] = rewards[i]
+
+            # Trigger done if threshold reached
+            if steps_since_last_reward[i] >= MAX_STEPS_SINCE_REWARD:
+                dones[i] = True
+
+    # Assertions:
+    # Env 0 never got fruit → done after 5 steps
+    assert dones[0].item() == 1, "Env 0 should be done after 5 steps without reward"
+
+    # Env 1 got fruit at step 2 → done after 5 steps since then → step 7 (counting from step 3)
+    assert dones[1].item() == 1, "Env 1 should be done after 5 steps following last fruit at t=2"
+
+    # Env 2 got fruit twice (step 4 and 7) so counter reset twice: should NOT be done
+    assert dones[2].item() == 0, "Env 2 should NOT be done due to resetting steps at fruit"
+
+
