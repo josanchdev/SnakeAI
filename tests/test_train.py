@@ -1,3 +1,36 @@
+from train import get_stall_limit, STALL_LIMIT_MAX, STALL_LIMIT_MIN, STALL_LIMIT_DECAY_STEPS
+def test_get_stall_limit_schedule():
+    """Test adaptive stall limit schedule for correct decay and clamping."""
+    # At step 0: should be max
+    assert get_stall_limit(0) == STALL_LIMIT_MAX
+    # Halfway through decay
+    halfway = STALL_LIMIT_DECAY_STEPS // 2
+    mid_limit = get_stall_limit(halfway)
+    assert STALL_LIMIT_MIN < mid_limit < STALL_LIMIT_MAX
+    # At end of decay: should be min
+    end_limit = get_stall_limit(STALL_LIMIT_DECAY_STEPS)
+    assert end_limit == STALL_LIMIT_MIN
+    # After decay: should stay at min
+    after_limit = get_stall_limit(STALL_LIMIT_DECAY_STEPS + 10000)
+    assert after_limit == STALL_LIMIT_MIN
+from train import compute_epsilon, EPS_WARMUP_STEPS, EPS_DECAY_STEPS, EPS_FINAL
+def test_compute_epsilon_schedule():
+    """Test adaptive epsilon schedule for correct warmup, decay, and final value."""
+    # Before warmup: epsilon should be 1.0
+    assert compute_epsilon(0) == 1.0
+    assert compute_epsilon(EPS_WARMUP_STEPS - 1) == 1.0
+    # At start of decay: epsilon should start to decrease
+    eps_decay_start = compute_epsilon(EPS_WARMUP_STEPS)
+    assert eps_decay_start < 1.0 and eps_decay_start > EPS_FINAL, f"Decay did not start: {eps_decay_start}"
+    # At halfway through decay
+    halfway = EPS_WARMUP_STEPS + EPS_DECAY_STEPS // 2
+    eps_half = compute_epsilon(halfway)
+    assert eps_half < 1.0 and eps_half > EPS_FINAL
+    # At end of decay: epsilon should be close to EPS_FINAL
+    eps_end = compute_epsilon(EPS_WARMUP_STEPS + EPS_DECAY_STEPS)
+    assert abs(eps_end - EPS_FINAL) < 1e-6
+    # After decay: epsilon should stay at EPS_FINAL (allow for floating point tolerance)
+    assert abs(compute_epsilon(EPS_WARMUP_STEPS + EPS_DECAY_STEPS + 10000) - EPS_FINAL) < 1e-8
 import torch
 import numpy as np
 import pytest

@@ -18,26 +18,24 @@ torch.manual_seed(seed)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
-
 # Hyperparameters
 LOG_DIR = "logs"
 CHECKPOINT_DIR = "checkpoints"
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-NUM_ENVS = 256
+NUM_ENVS = 64
 NUM_EPISODES = 1000
-MEMORY_SIZE = 200000
-BATCH_SIZE = 256
+MAX_STEPS_PER_EP = 100
+MEMORY_SIZE = 100000
+BATCH_SIZE = 128
 EPS_START = 1.0
-EPS_END = 0.1
-EPS_DECAY = 0.9995
-MAX_STEPS_SINCE_REWARD = 1000
+EPS_END = 0.05
+EPS_DECAY = 0.995
 LEARNING_RATE = 5e-4
 TARGET_UPDATE_FREQ = 1000  # steps
-GRAD_ACCUM_STEPS = 4  # Number of optimize_model() calls before optimizer.step()
+GRAD_ACCUM_STEPS = 2  # Number of optimize_model() calls before optimizer.step()
 SAVE_EVERY = 1000  # Save every N completed episodes
-STALL_PENALTY = -15
 
 # Initialize environments in batch
 envs = VectorEnv(num_envs=NUM_ENVS, device=device)
@@ -48,7 +46,6 @@ policy_net = DQN(input_dim=state_dim, output_dim=4).to(device)
 target_net = DQN(input_dim=state_dim, output_dim=4).to(device)
 target_net.load_state_dict(policy_net.state_dict())
 target_net.eval()
-
 
 optimizer = torch.optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
 memory = PrioritizedReplayMemory(capacity=MEMORY_SIZE)
@@ -138,7 +135,6 @@ def optimize_model():
     memory.update_priorities(idxs, td_errors_np)
     return ret_loss
 
-
 def get_latest_checkpoint(checkpoint_dir):
     files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pth') and 'dqn_snake_checkpoint_ep' in f]
     if not files:
@@ -154,9 +150,11 @@ def main():
 
     # Resume from latest checkpoint if available
     checkpoint, completed_episodes = get_latest_checkpoint(CHECKPOINT_DIR)
+
     episode_rewards = torch.zeros(NUM_ENVS, device=device)
     episode_steps = torch.zeros(NUM_ENVS, device=device)
     episode_counts = torch.zeros(NUM_ENVS, device=device)
+    
     if checkpoint:
         print(f"Resuming from checkpoint: {checkpoint}")
         state = torch.load(checkpoint, map_location=device, weights_only=False)
@@ -188,41 +186,12 @@ def main():
         completed_episodes = 0
 
     states = envs.reset()
-    rewards_log = []
-    # New: Track steps since last reward increase for each env
-    steps_since_last_reward = torch.zeros(NUM_ENVS, device=device)
-    last_rewards = torch.zeros(NUM_ENVS, device=device)
-
-    def checkpoint_path(ep):
-        return os.path.join(CHECKPOINT_DIR, f'dqn_snake_checkpoint_ep{ep}.pth')
-
-    def cleanup_old_checkpoints(current_ep, keep=3):
-        """Remove checkpoints older than the most recent `keep` ones."""
-        all_ckpts = [f for f in os.listdir(CHECKPOINT_DIR) if f.startswith('dqn_snake_checkpoint_ep') and f.endswith('.pth')]
-        # Extract episode numbers
-        eps = []
-        for fname in all_ckpts:
-            try:
-                num = int(fname.split('_ep')[1].split('.pth')[0])
-                eps.append((num, fname))
-            except Exception:
-                continue
-        eps.sort()
-        # Remove all but the last `keep` checkpoints
-        for num, fname in eps[:-keep]:
-            try:
-                os.remove(os.path.join(CHECKPOINT_DIR, fname))
-            except Exception:
-                pass
-
 
     import datetime
     with open(os.path.join(LOG_DIR, 'training_log.csv'), 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        # Prepare header: add reward breakdown columns if available in future
         header = [
             'GlobalEpisode', 'EnvID', 'Episode', 'Reward', 'Steps', 'Epsilon', 'AvgLoss', 'Timestamp'
-            # 'Reward_Fruit', 'Reward_Step', ... (future)
         ]
         writer.writerow(header)
 
@@ -231,25 +200,9 @@ def main():
         global_episode_counter = 0
         last_milestone = 0
 
-
         while episode_counts.min() < NUM_EPISODES:
             actions = select_actions_batch(policy_net, states, epsilon)
             next_states, rewards, dones = envs.step(actions)
-
-            # New: Update steps_since_last_reward
-            for i in range(NUM_ENVS):
-                # If reward increased, reset counter
-                if rewards[i].item() > last_rewards[i].item():
-                    steps_since_last_reward[i] = 0
-                else:
-                    steps_since_last_reward[i] += 1
-                last_rewards[i] = rewards[i]
-
-            # End episode if steps_since_last_reward exceeds threshold
-            for i in range(NUM_ENVS):
-                if steps_since_last_reward[i] >= MAX_STEPS_SINCE_REWARD:
-                    dones[i] = True
-                    rewards[i] = STALL_PENALTY
 
             # Store transitions
             for i in range(NUM_ENVS):
@@ -283,17 +236,15 @@ def main():
                         epsilon,
                         avg_loss,
                         timestamp
-                        # reward_fruit, reward_step, ... (future)
                     ])
                     episode_rewards[i] = 0
                     episode_steps[i] = 0
                     episode_counts[i] += 1
                     episode_losses[i] = 0
-                    steps_since_last_reward[i] = 0
-                    last_rewards[i] = 0
+
                     # Save checkpoint every SAVE_EVERY completed episodes
                     if completed_episodes % SAVE_EVERY == 0:
-                        ckpt_path = checkpoint_path(completed_episodes)
+                        ckpt_path = os.path.join(CHECKPOINT_DIR, f'dqn_snake_checkpoint_ep{completed_episodes}.pth')
                         torch.save({
                             'model': policy_net.state_dict(),
                             'optimizer': optimizer.state_dict(),
@@ -301,7 +252,21 @@ def main():
                             'episode_rewards': episode_rewards.cpu().numpy(),
                             'episode_steps': episode_steps.cpu().numpy(),
                         }, ckpt_path)
-                        cleanup_old_checkpoints(completed_episodes, keep=3)
+                        # Cleanup old checkpoints
+                        all_ckpts = [f for f in os.listdir(CHECKPOINT_DIR) if f.startswith('dqn_snake_checkpoint_ep') and f.endswith('.pth')]
+                        eps = []
+                        for fname in all_ckpts:
+                            try:
+                                num = int(fname.split('_ep')[1].split('.pth')[0])
+                                eps.append((num, fname))
+                            except Exception:
+                                continue
+                        eps.sort()
+                        for num, fname in eps[:-3]:
+                            try:
+                                os.remove(os.path.join(CHECKPOINT_DIR, fname))
+                            except Exception:
+                                pass
 
             # Print milestone summary only once per 100 global episodes (not per env, not at 0)
             min_episode = int(episode_counts.min().item())
@@ -325,4 +290,4 @@ def main():
 if __name__ == "__main__":
     print("Training started.")
     main()
-    print("Training ended.")
+    print("Training finished.")
