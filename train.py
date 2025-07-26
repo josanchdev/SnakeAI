@@ -37,6 +37,7 @@ LEARNING_RATE = 5e-4
 TARGET_UPDATE_FREQ = 1000  # steps
 GRAD_ACCUM_STEPS = 2  # Number of optimize_model() calls before optimizer.step()
 SAVE_EVERY = 1000  # Save every N completed episodes
+STALL_PENALTY = -15
 
 # Initialize environments in batch
 envs = VectorEnv(num_envs=NUM_ENVS, device=device)
@@ -248,6 +249,7 @@ def main():
             for i in range(NUM_ENVS):
                 if steps_since_last_reward[i] >= MAX_STEPS_SINCE_REWARD:
                     dones[i] = True
+                    rewards[i] = STALL_PENALTY
 
             # Store transitions
             for i in range(NUM_ENVS):
