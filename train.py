@@ -25,7 +25,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 NUM_ENVS = 64
-NUM_EPISODES = 1000
+NUM_EPISODES = 4000
 MAX_STEPS_PER_EP = 100
 MEMORY_SIZE = 100000
 BATCH_SIZE = 128
