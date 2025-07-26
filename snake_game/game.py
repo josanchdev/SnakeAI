@@ -56,17 +56,27 @@ class Fruit:
 
 class SnakeGame:
     def __init__(self, grid_size=12, cell_size=32, mode="human",
-                 reward_fruit=5, reward_death=-10, reward_step=-0.01):
+                 reward_fruit=5, reward_death=-10, reward_step=-0.01, reward_win=100):
         self.grid_size = grid_size
         self.cell_size = cell_size
         self.snake = Snake(grid_size)
         self.fruit = Fruit(grid_size, self.snake.body)
         self.score = 0
         self.running = True
+        self.won = False  # New win state
         self.mode = mode  # "human" or "ai"
         self.reward_fruit = reward_fruit
         self.reward_death = reward_death
         self.reward_step = reward_step
+        self.reward_win = reward_win  # New win reward
+
+    def check_win_condition(self):
+        """Check if the snake has filled the entire grid (win condition)."""
+        current_length = len(self.snake.body)
+        # If snake is set to grow, add 1 to current length
+        if self.snake.grow:
+            current_length += 1
+        return current_length == self.grid_size * self.grid_size
 
     def ai_step(self, action_idx, device):
         """Step using AI action index."""
@@ -76,8 +86,17 @@ class SnakeGame:
         self.snake.move()
         if self.snake.head() == self.fruit.position:
             self.snake.grow_snake()
-            self.fruit.respawn(self.snake.body)
             self.score += 1
+            
+            # Check win condition after eating fruit
+            if self.check_win_condition():
+                self.won = True
+                self.running = False
+                return
+            
+            # Only respawn fruit if we haven't won
+            self.fruit.respawn(self.snake.body)
+            
         if self.snake.collided_with_self() or self.snake.collided_with_wall():
             self.running = False
 
@@ -108,30 +127,39 @@ class SnakeGame:
                 ),
                 border_radius=7
             )
-        # Draw fruit
-        fx, fy = self.fruit.position
-        pygame.draw.ellipse(
-            screen, (220, 60, 60),
-            (
-                board_offset_x + fx*self.cell_size,
-                board_offset_y + fy*self.cell_size,
-                self.cell_size, self.cell_size
-            ),
-        )
+        
+        # Only draw fruit if we haven't won (snake hasn't filled the grid)
+        if not self.won:
+            fx, fy = self.fruit.position
+            pygame.draw.ellipse(
+                screen, (220, 60, 60),
+                (
+                    board_offset_x + fx*self.cell_size,
+                    board_offset_y + fy*self.cell_size,
+                    self.cell_size, self.cell_size
+                ),
+            )
         self.draw_scoreboard(screen, board_offset_x, board_offset_y)
 
     def draw_game_over(self, screen):
         font_size = max(20, int(min(screen.get_width(), screen.get_height()) // 10))
-        message = f"Game Over! Score: {self.score} (R to Restart)"
+        
+        if self.won:
+            message = f"YOU WIN! Perfect Score: {self.score} (R to Restart)"
+            color = (0, 255, 0)  # Green for win
+        else:
+            message = f"Game Over! Score: {self.score} (R to Restart)"
+            color = (255, 255, 255)  # White for game over
+            
         font = pygame.font.SysFont("arial", font_size)
-        text_surface = font.render(message, True, (255, 255, 255))
+        text_surface = font.render(message, True, color)
         text_rect = text_surface.get_rect(center=screen.get_rect().center)
 
         # Shrink font size if too wide
         while text_rect.width > screen.get_width() * 0.95 and font_size > 10:
             font_size -= 2
             font = pygame.font.SysFont("arial", font_size)
-            text_surface = font.render(message, True, (255, 255, 255))
+            text_surface = font.render(message, True, color)
             text_rect = text_surface.get_rect(center=screen.get_rect().center)
 
         screen.blit(text_surface, text_rect)
@@ -139,6 +167,8 @@ class SnakeGame:
     def draw_scoreboard(self, screen, board_offset_x=0, board_offset_y=0):
         font = pygame.font.SysFont("arial", 24)
         score_text = f"Score: {self.score}"
+        if self.won:
+            score_text += " - PERFECT!"
         text_surface = font.render(score_text, True, (255, 255, 255))
         # Place above the grid, aligned with grid edge
         screen.blit(text_surface, (board_offset_x, board_offset_y - 35))
@@ -147,7 +177,8 @@ class SnakeGame:
         self.__init__(self.grid_size, self.cell_size, self.mode,
                       reward_fruit=self.reward_fruit,
                       reward_death=self.reward_death,
-                      reward_step=self.reward_step)
+                      reward_step=self.reward_step,
+                      reward_win=self.reward_win)
         
 
     def get_state(self, device):
@@ -177,7 +208,6 @@ class SnakeGame:
         return full_state
     
 
-
     def step(self, action_idx: int, device):
         """
         Apply action, update game state, and return (next_state, reward, done).
@@ -189,20 +219,20 @@ class SnakeGame:
         self.snake.set_direction(ACTIONS[action_idx])
         prev_score = self.score
         self.update()
+        
+        # Determine reward and done state
         if not self.running:
-            reward = self.reward_death
+            if self.won:
+                reward = self.reward_win  # Win reward (100)
+            else:
+                reward = self.reward_death  # Death penalty (-10)
             done = True
         elif self.score > prev_score:
-            reward = self.reward_fruit
+            reward = self.reward_fruit  # Fruit eaten (5)
             done = False
         else:
-            reward = self.reward_step
+            reward = self.reward_step  # Step penalty (-0.01)
             done = False
+            
         next_state = self.get_state(device)
         return next_state, reward, done
-
-
-
-	
-
-

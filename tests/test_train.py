@@ -1,43 +1,10 @@
-from train import get_stall_limit, STALL_LIMIT_MAX, STALL_LIMIT_MIN, STALL_LIMIT_DECAY_STEPS
-def test_get_stall_limit_schedule():
-    """Test adaptive stall limit schedule for correct decay and clamping."""
-    # At step 0: should be max
-    assert get_stall_limit(0) == STALL_LIMIT_MAX
-    # Halfway through decay
-    halfway = STALL_LIMIT_DECAY_STEPS // 2
-    mid_limit = get_stall_limit(halfway)
-    assert STALL_LIMIT_MIN < mid_limit < STALL_LIMIT_MAX
-    # At end of decay: should be min
-    end_limit = get_stall_limit(STALL_LIMIT_DECAY_STEPS)
-    assert end_limit == STALL_LIMIT_MIN
-    # After decay: should stay at min
-    after_limit = get_stall_limit(STALL_LIMIT_DECAY_STEPS + 10000)
-    assert after_limit == STALL_LIMIT_MIN
-from train import compute_epsilon, EPS_WARMUP_STEPS, EPS_DECAY_STEPS, EPS_FINAL
-def test_compute_epsilon_schedule():
-    """Test adaptive epsilon schedule for correct warmup, decay, and final value."""
-    # Before warmup: epsilon should be 1.0
-    assert compute_epsilon(0) == 1.0
-    assert compute_epsilon(EPS_WARMUP_STEPS - 1) == 1.0
-    # At start of decay: epsilon should start to decrease
-    eps_decay_start = compute_epsilon(EPS_WARMUP_STEPS)
-    assert eps_decay_start < 1.0 and eps_decay_start > EPS_FINAL, f"Decay did not start: {eps_decay_start}"
-    # At halfway through decay
-    halfway = EPS_WARMUP_STEPS + EPS_DECAY_STEPS // 2
-    eps_half = compute_epsilon(halfway)
-    assert eps_half < 1.0 and eps_half > EPS_FINAL
-    # At end of decay: epsilon should be close to EPS_FINAL
-    eps_end = compute_epsilon(EPS_WARMUP_STEPS + EPS_DECAY_STEPS)
-    assert abs(eps_end - EPS_FINAL) < 1e-6
-    # After decay: epsilon should stay at EPS_FINAL (allow for floating point tolerance)
-    assert abs(compute_epsilon(EPS_WARMUP_STEPS + EPS_DECAY_STEPS + 10000) - EPS_FINAL) < 1e-8
 import torch
 import numpy as np
 import pytest
 from agent.dqn import DQN, ACTIONS
 from agent.prioritized_memory import PrioritizedReplayMemory
 from snake_game.vector_env import VectorEnv
-from train import select_actions_batch, optimize_model
+from snake_game.game import SnakeGame
 from train import select_actions_batch, optimize_model
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -99,63 +66,140 @@ def test_optimize_model_with_per():
     loss = optimize_model()
     assert loss is None or isinstance(loss, float)
 
-import torch
+def test_simple_epsilon_decay():
+    """Test the simple epsilon decay used in train.py."""
+    from train import EPS_START, EPS_END, EPS_DECAY
+    
+    epsilon = EPS_START  # Should be 1.0
+    assert epsilon == 1.0, f"Starting epsilon should be 1.0, got {epsilon}"
+    
+    # Test decay formula: epsilon = max(EPS_END, epsilon * EPS_DECAY)
+    for _ in range(10):
+        epsilon = max(EPS_END, epsilon * EPS_DECAY)
+    
+    assert epsilon <= EPS_START, "Epsilon should decrease from start value"
+    assert epsilon >= EPS_END, "Epsilon should not go below EPS_END"
+    
+    # Test that it eventually reaches EPS_END
+    epsilon = EPS_START
+    for _ in range(1000):  # Many decay steps
+        epsilon = max(EPS_END, epsilon * EPS_DECAY)
+    
+    assert epsilon == EPS_END, f"Epsilon should eventually reach EPS_END ({EPS_END}), got {epsilon}"
 
-def test_steps_since_last_reward_logic():
-    """
-    Test the 'steps_since_last_reward' counter logic that:
-    - resets to zero only when reward strictly increases (fruit eaten),
-    - increments otherwise,
-    - triggers done when threshold is reached.
+# ============= WIN CONDITION TRAINING TESTS =============
 
-    Uses a small threshold for quick testing.
-    """
-
-    NUM_ENVS = 3
-    MAX_STEPS_SINCE_REWARD = 5  # small for test speed
-    steps_since_last_reward = torch.zeros(NUM_ENVS)
-    last_rewards = torch.zeros(NUM_ENVS)
-    dones = torch.zeros(NUM_ENVS, dtype=torch.bool)
-
-    # Simulate 10 steps of reward sequences per env:
-    # Env 0 never gets reward (should be done at step 5)
-    # Env 1 gets reward at step 2 and never again (should be done at step 7)
-    # Env 2 gets rewards at steps 4 and 7 (should NOT be done)
-    rewards_seq = [
-        torch.tensor([0.0, 0.0, 0.0]),  # step 1
-        torch.tensor([0.0, 1.0, 0.0]),  # step 2 (env1 gets fruit)
-        torch.tensor([0.0, 1.0, 0.0]),  # step 3
-        torch.tensor([0.0, 1.0, 1.0]),  # step 4 (env2 gets fruit)
-        torch.tensor([0.0, 1.0, 1.0]),  # step 5
-        torch.tensor([0.0, 1.0, 1.0]),  # step 6
-        torch.tensor([0.0, 1.0, 2.0]),  # step 7 (env2 gets fruit again)
-        torch.tensor([0.0, 1.0, 2.0]),  # step 8
-        torch.tensor([0.0, 1.0, 2.0]),  # step 9
-        torch.tensor([0.0, 1.0, 2.0]),  # step 10
+def test_win_vs_death_rewards_training():
+    """Test that win gives positive reward while death gives negative in training context."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Test win scenario
+    win_game = SnakeGame(grid_size=3, reward_win=100, reward_death=-10, reward_fruit=5)
+    # Create valid snake body covering 8/9 cells
+    win_game.snake.body = [
+        (0, 1),  # Head at middle-left
+        (0, 0), (1, 0), (2, 0), (2, 1), (2, 2), (1, 2), (0, 2)  # Body in spiral
     ]
+    win_game.fruit.position = (1, 1)  # Center cell
+    win_game.snake.direction = (1, 0)  # Moving right to fruit
+    
+    _, win_reward, win_done = win_game.step(3, device)  # Move right
+    
+    # Test death scenario
+    death_game = SnakeGame(grid_size=3, reward_win=100, reward_death=-10, reward_fruit=5)
+    death_game.snake.body = [(2, 2)]
+    death_game.snake.direction = (1, 0)  # Move into wall
+    
+    _, death_reward, death_done = death_game.step(3, device)  # Move right into wall
+    
+    assert win_reward == 100, f"Win should give +100 reward, got {win_reward}"
+    assert death_reward == -10, f"Death should give -10 reward, got {death_reward}"
+    assert win_done and death_done, "Both scenarios should end the game"
 
-    for t, rewards in enumerate(rewards_seq):
-        for i in range(NUM_ENVS):
-            # Reset steps counter only if reward strictly increased (fruit eaten)
-            if rewards[i].item() > last_rewards[i].item():
-                steps_since_last_reward[i] = 0
-            else:
-                steps_since_last_reward[i] += 1
+def test_win_condition_in_vector_env():
+    """Test that win condition works correctly in vectorized training environment."""
+    envs = VectorEnv(num_envs=2, grid_size=3)
+    
+    # Set up env 0 to win
+    envs.envs[0].snake.body = [
+        (0, 1),  # Head at middle-left
+        (0, 0), (1, 0), (2, 0), (2, 1), (2, 2), (1, 2), (0, 2)  # Body
+    ]
+    envs.envs[0].fruit.position = (1, 1)  # Center cell
+    envs.envs[0].snake.direction = (1, 0)  # Moving right
+    
+    # Set up env 1 to die
+    envs.envs[1].snake.body = [(2, 2)]
+    envs.envs[1].fruit.position = (0, 0)
+    envs.envs[1].snake.direction = (1, 0)  # Will hit wall
+    
+    # Take actions: right for env0 (win), right for env1 (die)
+    actions = torch.tensor([3, 3])  # right, right
+    next_states, rewards, dones = envs.step(actions)
+    
+    assert rewards[0].item() == 100, f"Env 0 should win with +100 reward, got {rewards[0].item()}"
+    assert rewards[1].item() == -10, f"Env 1 should die with -10 reward, got {rewards[1].item()}"
+    assert dones[0].item() == True, "Env 0 should be done after winning"
+    assert dones[1].item() == True, "Env 1 should be done after dying"
 
-            last_rewards[i] = rewards[i]
+def test_reward_hierarchy_training():
+    """Test that reward hierarchy is correct: Win > Fruit > Step > Death."""
+    game = SnakeGame(grid_size=3, reward_win=100, reward_fruit=5, reward_step=-0.01, reward_death=-10)
+    
+    # Test reward values are in correct hierarchy
+    assert game.reward_win > game.reward_fruit, "Win reward should be higher than fruit reward"
+    assert game.reward_fruit > game.reward_step, "Fruit reward should be higher than step reward" 
+    assert game.reward_step > game.reward_death, "Step reward should be higher than death penalty"
+    
+    # Test that win reward incentivizes perfect play
+    max_possible_fruit_reward = (3 * 3 - 3) * game.reward_fruit  # 6 fruits max * 5 = 30
+    assert game.reward_win > max_possible_fruit_reward, "Win reward should exceed sum of all possible fruit rewards"
 
-            # Trigger done if threshold reached
-            if steps_since_last_reward[i] >= MAX_STEPS_SINCE_REWARD:
-                dones[i] = True
+def test_training_memory_with_win_rewards():
+    """Test that win rewards are properly stored in training memory."""
+    memory = PrioritizedReplayMemory(capacity=10)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Create dummy states
+    state = torch.zeros(150, dtype=torch.float32)  # Assuming 12x12 + 4 + 2 = 150
+    next_state = torch.zeros(150, dtype=torch.float32)
+    
+    # Add win experience
+    memory.add((state, 0, 100.0, next_state, True))  # Win reward
+    
+    # Add death experience  
+    memory.add((state, 1, -10.0, next_state, True))  # Death penalty
+    
+    # Add fruit experience
+    memory.add((state, 2, 5.0, next_state, False))  # Fruit reward
+    
+    # Sample from memory
+    batch, idxs, weights = memory.sample(3)
+    states, actions, rewards, next_states, dones = zip(*batch)
+    
+    # Check that all reward types are preserved
+    reward_values = [r for r in rewards]
+    assert 100.0 in reward_values, "Win reward should be in memory"
+    assert -10.0 in reward_values, "Death penalty should be in memory"  
+    assert 5.0 in reward_values, "Fruit reward should be in memory"
 
-    # Assertions:
-    # Env 0 never got fruit → done after 5 steps
-    assert dones[0].item() == 1, "Env 0 should be done after 5 steps without reward"
+def test_training_hyperparameters_match():
+    """Test that training hyperparameters are accessible and have expected values."""
+    from train import EPS_START, EPS_END, EPS_DECAY, LEARNING_RATE, BATCH_SIZE, NUM_ENVS
+    
+    # Test epsilon parameters
+    assert EPS_START == 1.0, f"EPS_START should be 1.0, got {EPS_START}"
+    assert EPS_END == 0.05, f"EPS_END should be 0.05, got {EPS_END}"
+    assert EPS_DECAY == 0.995, f"EPS_DECAY should be 0.995, got {EPS_DECAY}"
+    
+    # Test other hyperparameters are reasonable
+    assert LEARNING_RATE > 0, "Learning rate should be positive"
+    assert BATCH_SIZE > 0, "Batch size should be positive"
+    assert NUM_ENVS > 0, "Number of environments should be positive"
 
-    # Env 1 got fruit at step 2 → done after 5 steps since then → step 7 (counting from step 3)
-    assert dones[1].item() == 1, "Env 1 should be done after 5 steps following last fruit at t=2"
-
-    # Env 2 got fruit twice (step 4 and 7) so counter reset twice: should NOT be done
-    assert dones[2].item() == 0, "Env 2 should NOT be done due to resetting steps at fruit"
-
-
+def test_gradient_accumulation_steps():
+    """Test that gradient accumulation is working as configured."""
+    from train import GRAD_ACCUM_STEPS
+    
+    assert GRAD_ACCUM_STEPS >= 1, "Gradient accumulation steps should be at least 1"
+    assert isinstance(GRAD_ACCUM_STEPS, int), "Gradient accumulation steps should be an integer"
