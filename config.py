@@ -1,8 +1,5 @@
 """
-SlytherNN Configuration
-
-Centralized configuration for training, evaluation, and model parameters.
-Optimized for RTX 3090 (24GB) + Ryzen 9 5900X (32GB RAM) setup.
+Fixed config.py - Critical import and naming issues resolved
 """
 
 import os
@@ -16,7 +13,7 @@ CPU_CORES = 12       # Ryzen 9 5900X
 
 # Directory paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOGS_DIR = os.path.join(BASE_DIR, "logs")
+LOGS_DIR = os.path.join(BASE_DIR, "logs")           # Fixed: was LOG_DIR
 CHECKPOINTS_DIR = os.path.join(BASE_DIR, "checkpoints") 
 PLOTS_DIR = os.path.join(BASE_DIR, "plots")
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
@@ -90,6 +87,13 @@ class EvalConfig:
     EPSILON = 0.0        # Fully greedy
     RENDER_FPS = 8       # For GIF creation
     GIF_DURATION = 10    # Max seconds for GIF
+
+# Add ModelConfig class that was referenced but missing
+class ModelConfig:
+    INPUT_DIM = INPUT_DIM
+    OUTPUT_DIM = OUTPUT_DIM
+    HIDDEN_DIMS = [256, 256]
+    DROPOUT = 0.1
 
 # File patterns for cleanup
 CHECKPOINT_PATTERN = "dqn_snake_checkpoint_ep*.pth"

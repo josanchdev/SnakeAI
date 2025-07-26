@@ -8,15 +8,15 @@ import csv
 import json
 import datetime
 import torch
-from typing import Dict, List, Any, Optional
-from config import CHECKPOINT_DIR, LOG_DIR
+from typing import Dict, List, Any, Optional, Tuple
+from config import CHECKPOINTS_DIR, LOGS_DIR  # Fixed import
 
 
 class TrainingLogger:
     """Handles logging of training metrics to CSV and console."""
     
     def __init__(self, log_file: str = "training_log.csv"):
-        self.log_path = os.path.join(LOG_DIR, log_file)
+        self.log_path = os.path.join(LOGS_DIR, log_file)
         self.metrics_history = []
         self._init_csv()
     
@@ -72,7 +72,7 @@ class CheckpointManager:
         self.max_checkpoints = max_checkpoints
     
     def save_checkpoint(self, model_state: Dict[str, Any], episode: int, 
-                       additional_data: Optional[Dict] = None):
+                       additional_data: Optional[Dict] = None) -> str:
         """Save model checkpoint with metadata."""
         checkpoint_data = {
             'model': model_state,
@@ -81,15 +81,18 @@ class CheckpointManager:
             **(additional_data or {})
         }
         
-        ckpt_path = os.path.join(CHECKPOINT_DIR, f'dqn_snake_checkpoint_ep{episode}.pth')
+        ckpt_path = os.path.join(CHECKPOINTS_DIR, f'dqn_snake_checkpoint_ep{episode}.pth')
         torch.save(checkpoint_data, ckpt_path)
         
         self._cleanup_old_checkpoints()
         return ckpt_path
     
-    def load_latest_checkpoint(self) -> tuple[Optional[str], int]:
+    def load_latest_checkpoint(self) -> Tuple[Optional[str], int]:
         """Load the most recent checkpoint."""
-        files = [f for f in os.listdir(CHECKPOINT_DIR) 
+        if not os.path.exists(CHECKPOINTS_DIR):
+            return None, 0
+            
+        files = [f for f in os.listdir(CHECKPOINTS_DIR) 
                 if f.endswith('.pth') and 'dqn_snake_checkpoint_ep' in f]
         
         if not files:
@@ -100,11 +103,11 @@ class CheckpointManager:
         latest = files[-1]
         episode = int(latest.split('_ep')[1].split('.pth')[0])
         
-        return os.path.join(CHECKPOINT_DIR, latest), episode
+        return os.path.join(CHECKPOINTS_DIR, latest), episode
     
     def _cleanup_old_checkpoints(self):
         """Remove old checkpoints, keeping only the most recent ones."""
-        all_ckpts = [f for f in os.listdir(CHECKPOINT_DIR) 
+        all_ckpts = [f for f in os.listdir(CHECKPOINTS_DIR) 
                     if f.startswith('dqn_snake_checkpoint_ep') and f.endswith('.pth')]
         
         if len(all_ckpts) <= self.max_checkpoints:
@@ -124,14 +127,14 @@ class CheckpointManager:
         # Remove oldest checkpoints
         for num, fname in episodes[:-self.max_checkpoints]:
             try:
-                os.remove(os.path.join(CHECKPOINT_DIR, fname))
+                os.remove(os.path.join(CHECKPOINTS_DIR, fname))
             except OSError:
                 pass  # File might have been deleted already
 
 
 def save_training_config(config_dict: Dict[str, Any]):
     """Save training configuration for reproducibility."""
-    config_path = os.path.join(LOG_DIR, 'training_config.json')
+    config_path = os.path.join(LOGS_DIR, 'training_config.json')
     
     # Convert non-serializable objects to strings
     serializable_config = {}
@@ -147,7 +150,7 @@ def save_training_config(config_dict: Dict[str, Any]):
 
 def load_training_metrics(log_file: str = "training_log.csv") -> List[Dict]:
     """Load training metrics from CSV file."""
-    log_path = os.path.join(LOG_DIR, log_file)
+    log_path = os.path.join(LOGS_DIR, log_file)
     
     if not os.path.exists(log_path):
         return []
