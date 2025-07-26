@@ -27,15 +27,15 @@ os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 NUM_ENVS = 256
 NUM_EPISODES = 1000
-MEMORY_SIZE = 100000
+MEMORY_SIZE = 200000
 BATCH_SIZE = 256
 EPS_START = 1.0
-EPS_END = 0.05
-EPS_DECAY = 0.995
-MAX_STEPS_SINCE_REWARD = 100  
+EPS_END = 0.1
+EPS_DECAY = 0.9995
+MAX_STEPS_SINCE_REWARD = 1000
 LEARNING_RATE = 5e-4
 TARGET_UPDATE_FREQ = 1000  # steps
-GRAD_ACCUM_STEPS = 2  # Number of optimize_model() calls before optimizer.step()
+GRAD_ACCUM_STEPS = 4  # Number of optimize_model() calls before optimizer.step()
 SAVE_EVERY = 1000  # Save every N completed episodes
 STALL_PENALTY = -15
 
