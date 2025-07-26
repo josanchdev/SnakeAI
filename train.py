@@ -25,10 +25,10 @@ CHECKPOINT_DIR = "checkpoints"
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-NUM_ENVS = 64
+NUM_ENVS = 256
 NUM_EPISODES = 1000
 MEMORY_SIZE = 100000
-BATCH_SIZE = 128
+BATCH_SIZE = 256
 EPS_START = 1.0
 EPS_END = 0.05
 EPS_DECAY = 0.995
