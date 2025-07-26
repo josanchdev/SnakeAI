@@ -1,293 +1,370 @@
+#!/usr/bin/env python3
+"""
+SlytherNN Training Script
+
+High-performance DQN training for Snake with vectorized environments.
+Optimized for RTX 3090 + Ryzen 9 5900X hardware configuration.
+"""
+
 import os
+import time
 import random
 import numpy as np
-import time
 import torch
 import torch.nn.functional as F
-import csv
+from datetime import datetime
 
-from agent.dqn import DQN, ACTIONS
+from agent.dqn import DQN
 from agent.prioritized_memory import PrioritizedReplayMemory
 from snake_game.vector_env import VectorEnv
+from config import Config, DEVICE, INPUT_DIM, OUTPUT_DIM, CHECKPOINTS_DIR, LOGS_DIR
+from utils.logging import TrainingLogger, CheckpointManager
+from utils.visualization import plot_training_progress
 
-# Seed and device setup
-seed = 42
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Using device:", device)
 
-# Hyperparameters
-LOG_DIR = "logs"
-CHECKPOINT_DIR = "checkpoints"
-os.makedirs(LOG_DIR, exist_ok=True)
-os.makedirs(CHECKPOINT_DIR, exist_ok=True)
-
-NUM_ENVS = 64
-NUM_EPISODES = 1000
-MAX_STEPS_PER_EP = 100
-MEMORY_SIZE = 100000
-BATCH_SIZE = 128
-EPS_START = 1.0
-EPS_END = 0.05
-EPS_DECAY = 0.995
-LEARNING_RATE = 5e-4
-TARGET_UPDATE_FREQ = 1000  # steps
-GRAD_ACCUM_STEPS = 2  # Number of optimize_model() calls before optimizer.step()
-SAVE_EVERY = 1000  # Save every N completed episodes
-
-# Initialize environments in batch
-envs = VectorEnv(num_envs=NUM_ENVS, device=device)
-state_dim = envs.get_states().shape[1]
-
-# Networks
-policy_net = DQN(input_dim=state_dim, output_dim=4).to(device)
-target_net = DQN(input_dim=state_dim, output_dim=4).to(device)
-target_net.load_state_dict(policy_net.state_dict())
-target_net.eval()
-
-optimizer = torch.optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
-memory = PrioritizedReplayMemory(capacity=MEMORY_SIZE)
-
-# Mixed precision scaler (only if CUDA)
-use_amp = torch.cuda.is_available()
-scaler = torch.amp.GradScaler('cuda') if use_amp else None
-
-epsilon = EPS_START
-step_count = 0  # total environment steps
-
-def select_actions_batch(model, states, epsilon):
-    """
-    Batch epsilon-greedy action selection.
-
-    Args:
-        model: DQN
-        states: (batch_size, state_dim)
-        epsilon: float
-
-    Returns:
-        actions: torch.LongTensor (batch_size,)
-    """
-    batch_size = states.size(0)
-    random_actions = torch.randint(0, len(ACTIONS), (batch_size,), device=states.device)
-    with torch.no_grad():
-        q_values = model(states)
-        best_actions = torch.argmax(q_values, dim=1)
-    probs = torch.rand(batch_size, device=states.device)
-    chosen_actions = torch.where(probs < epsilon, random_actions, best_actions)
-    return chosen_actions
-
-def optimize_model():
-    if len(memory) < BATCH_SIZE:
-        return None
-    batch, idxs, is_weights = memory.sample(BATCH_SIZE)
-    states, actions, rewards, next_states, dones = zip(*batch)
-
-    states      = torch.stack(states).to(device)
-    actions     = torch.tensor(actions, dtype=torch.long, device=device).unsqueeze(1)
-    rewards     = torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(1)
-    next_states = torch.stack(next_states).to(device)
-    dones       = torch.tensor(dones, dtype=torch.float32, device=device).unsqueeze(1)
-    is_weights  = torch.tensor(is_weights, dtype=torch.float32, device=device).unsqueeze(1)
-
-    if not hasattr(optimize_model, "accum_step"):
-        optimize_model.accum_step = 0
-    if not hasattr(optimize_model, "accum_loss"):
-        optimize_model.accum_loss = 0.0
-
-    if use_amp:
-        with torch.amp.autocast('cuda'):
-            current_q = policy_net(states).gather(1, actions)
-            with torch.no_grad():
-                next_q = target_net(next_states).max(1, keepdim=True)[0]
-                expected_q = rewards + (0.99 * next_q * (1 - dones))
-            td_errors = current_q - expected_q
-            loss = (is_weights * td_errors.pow(2)).mean() / GRAD_ACCUM_STEPS
-        scaler.scale(loss).backward()
-    else:
-        current_q = policy_net(states).gather(1, actions)
+class SlytherNNTrainer:
+    """High-performance DQN trainer for Snake."""
+    
+    def __init__(self):
+        self.config = Config()
+        self._setup_reproducibility()
+        self._setup_training_components()
+        self._setup_logging()
+        print(f"🚀 SlytherNN Trainer initialized on {DEVICE}")
+    
+    def _setup_reproducibility(self):
+        """Set random seeds for reproducible training."""
+        random.seed(self.config.SEED)
+        np.random.seed(self.config.SEED) 
+        torch.manual_seed(self.config.SEED)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.config.SEED)
+            torch.backends.cudnn.deterministic = True
+    
+    def _setup_training_components(self):
+        """Initialize networks, optimizer, and training utilities."""
+        # Vectorized environments
+        self.envs = VectorEnv(self.config.NUM_ENVS, device=DEVICE)
+        
+        # Neural networks with larger architecture
+        self.policy_net = DQN(
+            input_dim=INPUT_DIM,
+            output_dim=OUTPUT_DIM,
+            hidden_dims=self.config.HIDDEN_DIMS,
+            dropout=self.config.DROPOUT
+        ).to(DEVICE)
+        
+        self.target_net = DQN(
+            input_dim=INPUT_DIM,
+            output_dim=OUTPUT_DIM, 
+            hidden_dims=self.config.HIDDEN_DIMS,
+            dropout=self.config.DROPOUT
+        ).to(DEVICE)
+        
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+        self.target_net.eval()
+        
+        # Optimizer with weight decay
+        self.optimizer = torch.optim.AdamW(
+            self.policy_net.parameters(),
+            lr=self.config.LEARNING_RATE,
+            weight_decay=1e-4
+        )
+        
+        # Learning rate scheduler
+        self.scheduler = torch.optim.lr_scheduler.StepLR(
+            self.optimizer, step_size=50000, gamma=0.9
+        )
+        
+        # Experience replay with PER
+        self.memory = PrioritizedReplayMemory(
+            capacity=self.config.MEMORY_SIZE,
+            alpha=self.config.PER_ALPHA,
+            beta=self.config.PER_BETA_START
+        )
+        
+        # Mixed precision training
+        self.scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
+        
+        # Training state
+        self.epsilon = self.config.EPS_START
+        self.steps_done = 0
+        self.episodes_done = 0
+        self.best_mean_reward = float('-inf')
+    
+    def _setup_logging(self):
+        """Initialize logging and checkpoint management."""
+        self.logger = TrainingLogger()
+        self.checkpoint_manager = CheckpointManager(max_checkpoints=5)
+        
+        # Load checkpoint if available
+        checkpoint_path, episodes = self.checkpoint_manager.load_latest_checkpoint()
+        if checkpoint_path:
+            self._load_checkpoint(checkpoint_path, episodes)
+    
+    def _load_checkpoint(self, path: str, episodes: int):
+        """Load training state from checkpoint."""
+        print(f"📁 Loading checkpoint: {path}")
+        
+        checkpoint = torch.load(path, map_location=DEVICE, weights_only=False)
+        
+        self.policy_net.load_state_dict(checkpoint['policy_net'])
+        self.target_net.load_state_dict(checkpoint['target_net'])
+        self.optimizer.load_state_dict(checkpoint['optimizer'])
+        
+        if 'scheduler' in checkpoint:
+            self.scheduler.load_state_dict(checkpoint['scheduler'])
+        
+        self.episodes_done = episodes
+        self.epsilon = checkpoint.get('epsilon', self.config.EPS_START)
+        self.steps_done = checkpoint.get('steps_done', 0)
+        self.best_mean_reward = checkpoint.get('best_mean_reward', float('-inf'))
+        
+        print(f"✅ Resumed from episode {episodes}")
+    
+    def select_actions(self, states: torch.Tensor) -> torch.Tensor:
+        """Vectorized epsilon-greedy action selection."""
+        batch_size = states.size(0)
+        
         with torch.no_grad():
-            next_q = target_net(next_states).max(1, keepdim=True)[0]
-            expected_q = rewards + (0.99 * next_q * (1 - dones))
-        td_errors = current_q - expected_q
-        loss = (is_weights * td_errors.pow(2)).mean() / GRAD_ACCUM_STEPS
-        loss.backward()
-
-    optimize_model.accum_step += 1
-    optimize_model.accum_loss += loss.item()
-
-    if optimize_model.accum_step % GRAD_ACCUM_STEPS == 0:
-        if use_amp:
-            scaler.step(optimizer)
-            scaler.update()
+            # Get Q-values from policy network
+            q_values = self.policy_net(states)
+            greedy_actions = q_values.argmax(dim=1)
+        
+        # Epsilon-greedy exploration
+        random_mask = torch.rand(batch_size, device=DEVICE) < self.epsilon
+        random_actions = torch.randint(0, OUTPUT_DIM, (batch_size,), device=DEVICE)
+        
+        actions = torch.where(random_mask, random_actions, greedy_actions)
+        return actions
+    
+    def optimize_model(self) -> float:
+        """Perform one optimization step."""
+        if len(self.memory) < self.config.BATCH_SIZE:
+            return 0.0
+        
+        # Sample batch from PER
+        batch, indices, weights = self.memory.sample(self.config.BATCH_SIZE)
+        states, actions, rewards, next_states, dones = zip(*batch)
+        
+        # Convert to tensors
+        states = torch.stack(states)
+        actions = torch.tensor(actions, dtype=torch.long, device=DEVICE)
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=DEVICE)
+        next_states = torch.stack(next_states)
+        dones = torch.tensor(dones, dtype=torch.bool, device=DEVICE)
+        weights = torch.tensor(weights, dtype=torch.float32, device=DEVICE)
+        
+        # Compute loss with mixed precision
+        if self.scaler is not None:
+            with torch.amp.autocast('cuda'):
+                loss, td_errors = self._compute_dqn_loss(
+                    states, actions, rewards, next_states, dones, weights
+                )
+            
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
         else:
-            optimizer.step()
-        optimizer.zero_grad()
-        optimize_model.accum_step = 0
-        ret_loss = optimize_model.accum_loss
-        optimize_model.accum_loss = 0.0
-    else:
-        ret_loss = None
+            loss, td_errors = self._compute_dqn_loss(
+                states, actions, rewards, next_states, dones, weights
+            )
+            loss.backward()
+            self.optimizer.step()
+        
+        self.optimizer.zero_grad()
+        self.scheduler.step()
+        
+        # Update PER priorities
+        priorities = td_errors.abs().detach().cpu().numpy() + self.config.PER_EPS
+        self.memory.update_priorities(indices, priorities)
+        
+        return loss.item()
+    
+    def _compute_dqn_loss(self, states, actions, rewards, next_states, dones, weights):
+        """Compute Double DQN loss with importance sampling."""
+        # Current Q-values
+        current_q_values = self.policy_net(states).gather(1, actions.unsqueeze(1))
+        
+        # Double DQN: use policy net to select actions, target net to evaluate
+        with torch.no_grad():
+            next_actions = self.policy_net(next_states).argmax(dim=1, keepdim=True)
+            next_q_values = self.target_net(next_states).gather(1, next_actions)
+            target_q_values = rewards.unsqueeze(1) + (
+                self.config.GAMMA * next_q_values * (~dones).unsqueeze(1)
+            )
+        
+        # Compute TD errors and weighted loss
+        td_errors = current_q_values - target_q_values
+        loss = (weights.unsqueeze(1) * td_errors.pow(2)).mean()
+        
+        return loss, td_errors.squeeze()
+    
+    def update_target_network(self):
+        """Soft update of target network."""
+        for target_param, policy_param in zip(self.target_net.parameters(), 
+                                             self.policy_net.parameters()):
+            target_param.data.copy_(
+                self.config.TAU * policy_param.data + 
+                (1.0 - self.config.TAU) * target_param.data
+            )
+    
+    def decay_epsilon(self):
+        """Update exploration rate."""
+        self.epsilon = max(
+            self.config.EPS_END,
+            self.epsilon * self.config.EPS_DECAY
+        )
+    
+    def save_checkpoint(self):
+        """Save current training state."""
+        checkpoint_data = {
+            'policy_net': self.policy_net.state_dict(),
+            'target_net': self.target_net.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'scheduler': self.scheduler.state_dict(),
+            'epsilon': self.epsilon,
+            'steps_done': self.steps_done,
+            'best_mean_reward': self.best_mean_reward,
+            'config': self.config.__dict__,
+        }
+        
+        return self.checkpoint_manager.save_checkpoint(
+            checkpoint_data, self.episodes_done
+        )
+    
+    def train(self):
+        """Main training loop."""
+        print("🎯 Starting SlytherNN training...")
+        
+        states = self.envs.reset()
+        episode_rewards = torch.zeros(self.config.NUM_ENVS, device=DEVICE)
+        episode_lengths = torch.zeros(self.config.NUM_ENVS, device=DEVICE)
+        recent_losses = []
+        
+        start_time = time.time()
+        last_print_time = start_time
+        
+        while self.episodes_done < self.config.NUM_EPISODES:
+            # Select and execute actions
+            actions = self.select_actions(states)
+            next_states, rewards, dones = self.envs.step(actions)
+            
+            # Store transitions
+            for i in range(self.config.NUM_ENVS):
+                self.memory.add((
+                    states[i].cpu(),
+                    actions[i].item(),
+                    rewards[i].item(),
+                    next_states[i].cpu(),
+                    dones[i].item()
+                ))
+            
+            # Update tracking
+            episode_rewards += rewards
+            episode_lengths += 1
+            states = next_states
+            self.steps_done += self.config.NUM_ENVS
+            
+            # Optimize model
+            if self.steps_done % self.config.UPDATE_EVERY == 0:
+                loss = self.optimize_model()
+                recent_losses.append(loss)
+                
+                # Keep only recent losses
+                if len(recent_losses) > 1000:
+                    recent_losses = recent_losses[-1000:]
+            
+            # Update target network
+            if self.steps_done % self.config.TARGET_UPDATE_FREQ == 0:
+                self.update_target_network()
+            
+            # Handle completed episodes
+            for i in range(self.config.NUM_ENVS):
+                if dones[i]:
+                    self.episodes_done += 1
+                    
+                    # Log episode
+                    self.logger.log_episode(
+                        global_episode=self.episodes_done,
+                        env_id=i,
+                        episode=self.episodes_done,
+                        reward=episode_rewards[i].item(),
+                        steps=int(episode_lengths[i].item()),
+                        epsilon=self.epsilon,
+                        avg_loss=np.mean(recent_losses) if recent_losses else 0.0
+                    )
+                    
+                    # Reset episode tracking
+                    episode_rewards[i] = 0
+                    episode_lengths[i] = 0
+            
+            # Decay exploration
+            self.decay_epsilon()
+            
+            # Periodic logging and saving
+            current_time = time.time()
+            if current_time - last_print_time >= 60:  # Every minute
+                self._print_progress(current_time - start_time, recent_losses)
+                last_print_time = current_time
+            
+            if self.episodes_done % self.config.SAVE_EVERY == 0 and self.episodes_done > 0:
+                self.save_checkpoint()
+        
+        # Training completed
+        total_time = time.time() - start_time
+        print(f"🎉 Training completed in {total_time/3600:.2f} hours!")
+        
+        # Generate final visualizations
+        self._finalize_training()
+    
+    def _print_progress(self, elapsed_time: float, recent_losses: list):
+        """Print training progress."""
+        if not self.logger.metrics_history:
+            return
+        
+        recent_metrics = self.logger.metrics_history[-100:]  # Last 100 episodes
+        avg_reward = np.mean([m['reward'] for m in recent_metrics])
+        avg_steps = np.mean([m['steps'] for m in recent_metrics])
+        avg_loss = np.mean(recent_losses) if recent_losses else 0.0
+        
+        print(f"Episode {self.episodes_done:5d} | "
+              f"Reward: {avg_reward:6.2f} | "
+              f"Steps: {avg_steps:5.1f} | "  
+              f"Loss: {avg_loss:.4f} | "
+              f"ε: {self.epsilon:.3f} | "
+              f"Time: {elapsed_time/3600:.2f}h")
+    
+    def _finalize_training(self):
+        """Generate final results and cleanup."""
+        print("📊 Generating training visualizations...")
+        
+        if self.logger.metrics_history:
+            # Create plots
+            plot_training_progress(self.logger.metrics_history)
+            
+            # Save final checkpoint
+            self.save_checkpoint()
+            
+            # Calculate final statistics
+            final_metrics = self.logger.metrics_history[-1000:]  # Last 1000 episodes
+            final_reward = np.mean([m['reward'] for m in final_metrics])
+            
+            print(f"✅ Final mean reward: {final_reward:.2f}")
+            print(f"📁 Results saved to {PLOTS_DIR}")
 
-    # Update priorities in PER
-    td_errors_np = td_errors.detach().abs().cpu().numpy().flatten()
-    memory.update_priorities(idxs, td_errors_np)
-    return ret_loss
-
-def get_latest_checkpoint(checkpoint_dir):
-    files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pth') and 'dqn_snake_checkpoint_ep' in f]
-    if not files:
-        return None, 0
-    files.sort(key=lambda x: int(x.split('_ep')[1].split('.pth')[0]))
-    latest = files[-1]
-    ep = int(latest.split('_ep')[1].split('.pth')[0])
-    return os.path.join(checkpoint_dir, latest), ep
 
 def main():
-    global epsilon, step_count
-    start_time = time.time()
+    """Entry point for training."""
+    try:
+        trainer = SlytherNNTrainer()
+        trainer.train()
+    except KeyboardInterrupt:
+        print("\n⚠️  Training interrupted by user")
+    except Exception as e:
+        print(f"❌ Training failed: {e}")
+        raise
 
-    # Resume from latest checkpoint if available
-    checkpoint, completed_episodes = get_latest_checkpoint(CHECKPOINT_DIR)
-
-    episode_rewards = torch.zeros(NUM_ENVS, device=device)
-    episode_steps = torch.zeros(NUM_ENVS, device=device)
-    episode_counts = torch.zeros(NUM_ENVS, device=device)
-    
-    if checkpoint:
-        print(f"Resuming from checkpoint: {checkpoint}")
-        state = torch.load(checkpoint, map_location=device, weights_only=False)
-        per_env_missing = False
-        if isinstance(state, dict) and 'model' in state and 'optimizer' in state:
-            policy_net.load_state_dict(state['model'])
-            target_net.load_state_dict(state['model'])
-            optimizer.load_state_dict(state['optimizer'])
-            # Restore per-env stats if present
-            if 'episode_counts' in state:
-                episode_counts = torch.tensor(state['episode_counts'], device=device)
-            else:
-                per_env_missing = True
-            if 'episode_rewards' in state:
-                episode_rewards = torch.tensor(state['episode_rewards'], device=device)
-            else:
-                per_env_missing = True
-            if 'episode_steps' in state:
-                episode_steps = torch.tensor(state['episode_steps'], device=device)
-            else:
-                per_env_missing = True
-            if per_env_missing:
-                print("[WARN] Checkpoint missing per-env episode_counts/rewards/steps, initializing all to zero and starting per-env logs from 0.")
-        else:
-            policy_net.load_state_dict(state)
-            target_net.load_state_dict(state)
-        print(f"Resumed at {completed_episodes} completed episodes.")
-    else:
-        completed_episodes = 0
-
-    states = envs.reset()
-
-    import datetime
-    with open(os.path.join(LOG_DIR, 'training_log.csv'), 'w', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        header = [
-            'GlobalEpisode', 'EnvID', 'Episode', 'Reward', 'Steps', 'Epsilon', 'AvgLoss', 'Timestamp'
-        ]
-        writer.writerow(header)
-
-        # Track per-episode losses for each env
-        episode_losses = torch.zeros(NUM_ENVS, device=device)
-        global_episode_counter = 0
-        last_milestone = 0
-
-        while episode_counts.min() < NUM_EPISODES:
-            actions = select_actions_batch(policy_net, states, epsilon)
-            next_states, rewards, dones = envs.step(actions)
-
-            # Store transitions
-            for i in range(NUM_ENVS):
-                memory.add((states[i].to(device), actions[i].item(), rewards[i].item(), next_states[i].to(device), dones[i].item()))
-
-            # Accumulate rewards, steps, and losses
-            episode_rewards += rewards
-            episode_steps += 1
-
-            # Get loss for this step (shared for all envs, so just use for all)
-            loss = optimize_model()
-            if loss is not None:
-                # Distribute loss equally to all running envs for this step
-                for i in range(NUM_ENVS):
-                    if not dones[i]:
-                        episode_losses[i] += loss / NUM_ENVS
-
-            # When done, log episode info and reset counters for that env
-            for i in range(NUM_ENVS):
-                if dones[i]:
-                    global_episode_counter += 1
-                    completed_episodes += 1
-                    avg_loss = episode_losses[i].item() / episode_steps[i].item() if episode_steps[i].item() > 0 else 0.0
-                    timestamp = datetime.datetime.now().isoformat()
-                    writer.writerow([
-                        global_episode_counter,  # GlobalEpisode
-                        i,                      # EnvID
-                        int(episode_counts[i]+1), # Episode (per-env)
-                        episode_rewards[i].item(),
-                        int(episode_steps[i].item()),
-                        epsilon,
-                        avg_loss,
-                        timestamp
-                    ])
-                    episode_rewards[i] = 0
-                    episode_steps[i] = 0
-                    episode_counts[i] += 1
-                    episode_losses[i] = 0
-
-                    # Save checkpoint every SAVE_EVERY completed episodes
-                    if completed_episodes % SAVE_EVERY == 0:
-                        ckpt_path = os.path.join(CHECKPOINT_DIR, f'dqn_snake_checkpoint_ep{completed_episodes}.pth')
-                        torch.save({
-                            'model': policy_net.state_dict(),
-                            'optimizer': optimizer.state_dict(),
-                            'episode_counts': episode_counts.cpu().numpy(),
-                            'episode_rewards': episode_rewards.cpu().numpy(),
-                            'episode_steps': episode_steps.cpu().numpy(),
-                        }, ckpt_path)
-                        # Cleanup old checkpoints
-                        all_ckpts = [f for f in os.listdir(CHECKPOINT_DIR) if f.startswith('dqn_snake_checkpoint_ep') and f.endswith('.pth')]
-                        eps = []
-                        for fname in all_ckpts:
-                            try:
-                                num = int(fname.split('_ep')[1].split('.pth')[0])
-                                eps.append((num, fname))
-                            except Exception:
-                                continue
-                        eps.sort()
-                        for num, fname in eps[:-3]:
-                            try:
-                                os.remove(os.path.join(CHECKPOINT_DIR, fname))
-                            except Exception:
-                                pass
-
-            # Print milestone summary only once per 100 global episodes (not per env, not at 0)
-            min_episode = int(episode_counts.min().item())
-            if min_episode >= last_milestone + 100 and min_episode > 0:
-                last_milestone = (min_episode // 100) * 100
-                print(f"Milestone: {last_milestone} episodes completed.")
-
-            # Update target network periodically
-            if step_count % TARGET_UPDATE_FREQ == 0:
-                target_net.load_state_dict(policy_net.state_dict())
-
-            # Decay epsilon
-            epsilon = max(EPS_END, epsilon * EPS_DECAY)
-
-            states = next_states
-            step_count += NUM_ENVS  # one step per env per loop
-
-    elapsed = time.time() - start_time
-    print(f"Training completed in {elapsed:.2f} seconds for {NUM_EPISODES} episodes.")
 
 if __name__ == "__main__":
-    print("Training started.")
     main()
-    print("Training finished.")

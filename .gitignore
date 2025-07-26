@@ -1,46 +1,140 @@
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+*$py.class
 *.so
 
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
 # Virtual environments
-.venv/
+.env
+.venv
+env/
 venv/
 ENV/
-env/
-.Python
+env.bak/
+venv.bak/
 
-# macOS and Linux files
-.DS_Store
-*.swp
-
-# VSCode/settings (optional)
-.vscode/
-
-# Python metadata & lock files (optional)
-pip-wheel-metadata/
-*.egg-info/
-.eggs/
-
-# Pyright, mypy, pyre cache (if you use type checkers)
-.pyright/
-.mypy_cache/
-.pyre_cache/
-
-# UV, Pipenv, Poetry lock files (add as needed)
+# UV
 uv.lock
-Pipfile.lock
-poetry.lock
 
-# Jupyter notebooks checkpoints (if you add .ipynb)
-.ipynb_checkpoints/
+# PyCharm
+.idea/
 
-# System-specific
+# VSCode
+.vscode/
+*.code-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows
 Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.tmp
+*.temp
 desktop.ini
+$RECYCLE.BIN/
 
-# RL outputs and logs
-logs/
-checkpoints/
-*.csv
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# SlytherNN specific
+logs/*.csv
+!logs/.gitkeep
+checkpoints/*.pth
+!checkpoints/.gitkeep
+results/*.gif
+results/*.mp4
+results/*.json
+!results/.gitkeep
+plots/*.png
+!plots/.gitkeep
+
+# Training artifacts
+*.log
+wandb/
+tensorboard_logs/
+
+# Large files
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# Temporary analysis files
+analysis_temp/
+temp_plots/
