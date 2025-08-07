@@ -1,4 +1,4 @@
-# 🐍 SlytherNN: Deep Reinforcement Learning for Snake Game
+# 🐍 SnakeAI: Deep Reinforcement Learning for Snake Game
 
 *A high-performance DQN agent achieving superhuman performance in the classic Snake game*
 
