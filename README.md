@@ -66,8 +66,6 @@ This isn't just another Snake AI - it's a **research-grade implementation** that
 3. **Performance Engineering:** GPU optimization and efficient data structures
 4. **Practical AI Development:** End-to-end pipeline from training to deployment
 
-Perfect for demonstrating deep learning expertise in **AI internship applications** or **portfolio reviews**.
-
 ---
 
 ## 🚀 Quick Start
