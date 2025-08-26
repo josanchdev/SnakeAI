@@ -21,7 +21,7 @@ This project implements a sophisticated reward structure that goes beyond simple
 
 ### Key Insight: Step Penalties Drive Intelligence
 
-Our analysis revealed that **step penalties fundamentally change agent behavior**, creating more intelligent and efficient gameplay:
+My analysis revealed that **step penalties fundamentally change agent behavior**, creating more intelligent and efficient gameplay:
 
 ![Reward Comparison](plots/reward_smoothed.png)
 *Smoothed reward curves showing how step penalties affect learning dynamics*
